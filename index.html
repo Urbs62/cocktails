@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="sv">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#101614">
+    <title>COCKTAIL</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="app-header-inner">
+        <h1>COCKTAIL</h1>
+        <div class="backup-actions" aria-label="Backup">
+          <button class="icon-button" id="exportBtn" type="button" title="Exportera JSON" aria-label="Exportera JSON">↓</button>
+          <label class="icon-button file-button" title="Importera JSON" aria-label="Importera JSON">
+            ↑
+            <input id="importInput" type="file" accept="application/json,.json">
+          </label>
+        </div>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section class="status-strip" aria-label="Status">
+        <div>
+          <span class="muted">I Barskåpet</span>
+          <strong id="inventoryCount">0</strong>
+        </div>
+        <div>
+          <span class="muted">Recept</span>
+          <strong id="recipeCount">0</strong>
+        </div>
+        <div>
+          <span class="muted">Kan göras</span>
+          <strong id="makeableCount">0</strong>
+        </div>
+      </section>
+
+      <p class="toast" id="toast" role="status" aria-live="polite" hidden></p>
+
+      <details class="panel" data-panel-id="inventory" open>
+        <summary>
+          <span>I Barskåpet</span>
+          <small id="inventorySummaryText"></small>
+        </summary>
+        <div class="panel-body">
+          <form class="filters" id="inventoryFilters">
+            <label>
+              <span>Plats</span>
+              <select id="filterLocation">
+                <option value="all">Alla</option>
+                <option value="Hemma">Hemma</option>
+                <option value="Stugan">Stugan</option>
+              </select>
+            </label>
+            <label>
+              <span>Kategori</span>
+              <select id="filterCategory">
+                <option value="all">Alla</option>
+              </select>
+            </label>
+            <label>
+              <span>Typ</span>
+              <select id="filterType">
+                <option value="all">Alla</option>
+              </select>
+            </label>
+            <label class="search-field">
+              <span>Sök</span>
+              <input id="filterSearch" type="search" placeholder="Namn eller typ">
+            </label>
+          </form>
+          <div class="type-summary" id="typeSummary"></div>
+          <div class="list" id="inventoryList"></div>
+        </div>
+      </details>
+
+      <details class="panel" data-panel-id="add-inventory">
+        <summary>
+          <span>Lägg in i Barskåpet</span>
+          <small id="inventoryFormMode">Ny ingrediens</small>
+        </summary>
+        <div class="panel-body">
+          <form class="editor-grid" id="inventoryForm">
+            <input type="hidden" id="inventoryId">
+            <label>
+              <span>Typ</span>
+              <select id="inventoryType" required></select>
+            </label>
+            <label>
+              <span>Namn</span>
+              <input id="inventoryName" required placeholder="Beefeater">
+            </label>
+            <div class="split">
+              <label>
+                <span>Mängd</span>
+                <input id="inventoryAmount" type="number" min="0" step="0.1" required>
+              </label>
+              <label>
+                <span>Enhet</span>
+                <input id="inventoryUnit" required placeholder="cl, ml, l, st">
+              </label>
+            </div>
+            <label>
+              <span>Plats</span>
+              <select id="inventoryLocation">
+                <option>Hemma</option>
+                <option>Stugan</option>
+              </select>
+            </label>
+            <div class="form-actions">
+              <button class="primary" type="submit">Spara ingrediens</button>
+              <button id="resetInventoryForm" type="button">Rensa</button>
+            </div>
+          </form>
+        </div>
+      </details>
+
+      <details class="panel" data-panel-id="recipes" open>
+        <summary>
+          <span>Recept</span>
+          <small id="recipeSummaryText"></small>
+        </summary>
+        <div class="panel-body">
+          <div class="list" id="recipeList"></div>
+        </div>
+      </details>
+
+      <details class="panel" data-panel-id="add-recipe">
+        <summary>
+          <span>Lägg till recept</span>
+          <small id="recipeFormMode">Nytt recept</small>
+        </summary>
+        <div class="panel-body">
+          <form class="editor-grid" id="recipeForm">
+            <input type="hidden" id="recipeId">
+            <label>
+              <span>Namn</span>
+              <input id="recipeName" required placeholder="Gin & Tonic">
+            </label>
+            <div class="ingredient-editor">
+              <div class="field-title">Ingredienser</div>
+              <div class="ingredient-rows" id="recipeIngredientRows"></div>
+              <button id="addRecipeIngredient" type="button">Lägg till ingrediens</button>
+            </div>
+            <label>
+              <span>Instruktioner</span>
+              <textarea id="recipeInstructions" rows="4" required placeholder="Bygg i glas över is. Rör kort."></textarea>
+            </label>
+            <label>
+              <span>Källa</span>
+              <input id="recipeSourceUrl" type="text" inputmode="url" autocomplete="url" placeholder="https://...">
+            </label>
+            <div class="form-actions">
+              <button class="primary" type="submit">Spara recept</button>
+              <button id="resetRecipeForm" type="button">Rensa</button>
+            </div>
+          </form>
+        </div>
+      </details>
+    </main>
+
+    <template id="emptyTemplate">
+      <div class="empty-state">
+        <strong>Inget här ännu.</strong>
+        <span>Lägg till några flaskor eller recept så vaknar panelen.</span>
+      </div>
+    </template>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>

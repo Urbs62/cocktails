@@ -1,0 +1,21 @@
+{
+  "name": "COCKTAIL",
+  "short_name": "COCKTAIL",
+  "description": "Offline barskåp och recept för cocktails hemma och i stugan.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#101614",
+  "theme_color": "#101614",
+  "lang": "sv-SE",
+  "categories": ["food", "productivity"],
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='40' fill='%23101614'/%3E%3Cpath d='M48 40h96l-38 50v42l26 12v12H60v-12l26-12V90L48 40Z' fill='%23d6b36a'/%3E%3Cpath d='M70 58h52L96 91 70 58Z' fill='%2368b78f'/%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
