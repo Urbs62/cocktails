@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#101614">
     <title>COCKTAIL</title>
+    <link rel="icon" href="data:,">
     <link rel="manifest" href="manifest.json">
     <link rel="stylesheet" href="styles.css">
   </head>
@@ -12,13 +13,6 @@
     <header class="app-header">
       <div class="app-header-inner">
         <h1>COCKTAIL</h1>
-        <div class="backup-actions" aria-label="Backup">
-          <button class="icon-button" id="exportBtn" type="button" title="Exportera JSON" aria-label="Exportera JSON">↓</button>
-          <label class="icon-button file-button" title="Importera JSON" aria-label="Importera JSON">
-            ↑
-            <input id="importInput" type="file" accept="application/json,.json">
-          </label>
-        </div>
       </div>
     </header>
 
@@ -160,6 +154,92 @@
           </form>
         </div>
       </details>
+
+      <details class="panel" data-panel-id="add-type">
+        <summary>
+          <span>Lägg till typ</span>
+          <small id="typeSummaryText">Ny ingredienstyp</small>
+        </summary>
+        <div class="panel-body">
+          <form class="editor-grid" id="typeForm">
+            <label>
+              <span>Typ</span>
+              <input id="newTypeName" required placeholder="Kaffelikör">
+            </label>
+            <label>
+              <span>Kategori</span>
+              <select id="newTypeCategory" required></select>
+            </label>
+            <div class="form-actions">
+              <button class="primary" type="submit">Spara typ</button>
+              <button id="resetTypeForm" type="button">Rensa</button>
+            </div>
+          </form>
+        </div>
+      </details>
+
+      <details class="panel backup-panel" data-panel-id="backup-restore" open>
+        <summary>
+          <span>Backup & Restore</span>
+          <small id="backupSummaryText">Trygg flytt mellan enheter</small>
+        </summary>
+        <div class="panel-body">
+          <div class="backup-status" aria-label="Backupstatus">
+            <div>
+              <span>Senast exporterad:</span>
+              <strong id="lastExportedAt">Aldrig</strong>
+            </div>
+            <div>
+              <span>Senast importerad:</span>
+              <strong id="lastRestoredAt">Aldrig</strong>
+            </div>
+          </div>
+
+          <div class="backup-buttons">
+            <button class="primary" id="exportBtn" type="button">Exportera backup</button>
+            <button id="restoreBtn" type="button">Ersätt med backup</button>
+            <input id="importInput" class="file-input" type="file" accept="application/json,.json">
+          </div>
+
+          <pre class="restore-log" id="restoreLog" hidden></pre>
+
+          <section class="system-info" aria-label="Systeminfo">
+            <h2>Systeminfo</h2>
+            <div class="system-grid">
+              <div>
+                <span>Inventory</span>
+                <strong id="debugInventoryCount">0</strong>
+              </div>
+              <div>
+                <span>Recipes</span>
+                <strong id="debugRecipeCount">0</strong>
+              </div>
+              <div>
+                <span>Ingredient Types</span>
+                <strong id="debugTypeCount">0</strong>
+              </div>
+            </div>
+          </section>
+        </div>
+      </details>
+
+      <dialog class="restore-dialog" id="restoreDialog" aria-labelledby="restoreDialogTitle">
+        <form method="dialog">
+          <h2 id="restoreDialogTitle">Ersätt med backup?</h2>
+          <p>Denna åtgärd ersätter all lokal data med innehållet i backupfilen.</p>
+          <p>Detta kommer att ersätta:</p>
+          <ul>
+            <li>Lager</li>
+            <li>Recept</li>
+            <li>Typer</li>
+            <li>Inställningar</li>
+          </ul>
+          <div class="dialog-actions">
+            <button class="primary" id="confirmRestoreBtn" type="submit">Fortsätt</button>
+            <button id="cancelRestoreBtn" type="submit">Avbryt</button>
+          </div>
+        </form>
+      </dialog>
     </main>
 
     <template id="emptyTemplate">

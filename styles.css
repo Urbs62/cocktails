@@ -110,21 +110,7 @@ h1 {
   text-transform: uppercase;
 }
 
-.backup-actions {
-  display: flex;
-  gap: 0.45rem;
-}
-
-.icon-button {
-  display: grid;
-  width: 42px;
-  place-items: center;
-  padding: 0;
-  font-size: 1.1rem;
-  font-weight: 900;
-}
-
-.file-button input {
+.file-input {
   position: absolute;
   inline-size: 1px;
   block-size: 1px;
@@ -503,10 +489,155 @@ textarea:focus {
   color: #d9f6e6;
   font-size: 0.88rem;
   font-weight: 750;
+  white-space: pre-line;
 }
 
 a {
   color: var(--accent);
+}
+
+.backup-panel {
+  margin-top: 0.75rem;
+}
+
+.backup-status {
+  display: grid;
+  gap: 0.45rem;
+  padding-top: 0.85rem;
+}
+
+.backup-status > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #101916;
+}
+
+.backup-status span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.backup-status strong {
+  min-width: 0;
+  font-size: 0.9rem;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.backup-buttons {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.55rem;
+  margin-top: 0.7rem;
+}
+
+.system-info {
+  margin-top: 0.8rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(16, 25, 22, 0.74);
+}
+
+.system-info h2 {
+  margin: 0 0 0.6rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  letter-spacing: 0;
+}
+
+.system-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.45rem;
+}
+
+.system-grid > div {
+  min-width: 0;
+  padding: 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #101916;
+}
+
+.system-grid span,
+.system-grid strong {
+  display: block;
+}
+
+.system-grid span {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.system-grid strong {
+  margin-top: 0.12rem;
+}
+
+.restore-log {
+  margin: 0.65rem 0 0;
+  padding: 0.65rem;
+  border: 1px solid rgba(104, 183, 143, 0.45);
+  border-radius: 8px;
+  background: rgba(104, 183, 143, 0.1);
+  color: #d9f6e6;
+  font: inherit;
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+}
+
+.restore-dialog {
+  width: min(440px, calc(100% - 2rem));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  padding: 0;
+}
+
+.restore-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.68);
+}
+
+.restore-dialog form {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+}
+
+.restore-dialog h2,
+.restore-dialog p,
+.restore-dialog ul {
+  margin: 0;
+}
+
+.restore-dialog h2 {
+  font-size: 1.1rem;
+}
+
+.restore-dialog p,
+.restore-dialog li {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.restore-dialog ul {
+  padding-left: 1.25rem;
+}
+
+.dialog-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem;
+  margin-top: 0.25rem;
 }
 
 @media (min-width: 680px) {
@@ -516,6 +647,11 @@ a {
 
   .filters {
     grid-template-columns: 0.75fr 0.95fr 0.95fr 1.35fr;
+  }
+
+  .backup-status,
+  .backup-buttons {
+    grid-template-columns: 1fr 1fr;
   }
 
   .search-field {

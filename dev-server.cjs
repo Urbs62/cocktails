@@ -15,6 +15,11 @@ const types = {
 
 http.createServer((req, res) => {
   let pathname = decodeURIComponent(new URL(req.url, `http://${req.headers.host}`).pathname);
+  if (pathname === "/favicon.ico") {
+    res.writeHead(204, { "Cache-Control": "no-store" });
+    res.end();
+    return;
+  }
   if (pathname === "/") pathname = "/index.html";
 
   const file = path.normalize(path.join(root, pathname));

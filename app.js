@@ -1,40 +1,48 @@
 const STORAGE_KEY = "cocktails:data:v1";
+const TYPE_STORAGE_KEY = "ingredientTypes";
 const PANEL_KEY = "cocktails:panels:v1";
+const LAST_EXPORTED_KEY = "cocktails:backup:lastExportedAt";
+const LAST_RESTORED_KEY = "cocktails:backup:lastRestoredAt";
 const LOCATIONS = ["Hemma", "Stugan"];
-const INGREDIENT_TYPES = [
-  { type: "Gin", category: "Sprit" },
-  { type: "Vodka", category: "Sprit" },
-  { type: "Ljus rom", category: "Sprit" },
-  { type: "Mörk rom", category: "Sprit" },
-  { type: "Whisky", category: "Sprit" },
-  { type: "Bourbon", category: "Sprit" },
-  { type: "Tequila", category: "Sprit" },
-  { type: "Cognac", category: "Sprit" },
-  { type: "Campari", category: "Likör" },
-  { type: "Aperol", category: "Likör" },
-  { type: "Triple sec", category: "Likör" },
-  { type: "Cointreau", category: "Likör" },
-  { type: "Söt vermouth", category: "Likör" },
-  { type: "Torr vermouth", category: "Likör" },
-  { type: "Tonic", category: "Mixer" },
-  { type: "Sodavatten", category: "Mixer" },
-  { type: "Ginger Beer", category: "Mixer" },
-  { type: "Cola", category: "Mixer" },
-  { type: "Limejuice", category: "Juice & Syrup" },
-  { type: "Citronjuice", category: "Juice & Syrup" },
-  { type: "Sockerlag", category: "Juice & Syrup" },
-  { type: "Angostura bitters", category: "Bitters & Smaksättare" },
-  { type: "Apelsinzest", category: "Garnityr" },
-  { type: "Cocktailbär", category: "Garnityr" },
-  { type: "Oliver", category: "Garnityr" }
+const CATEGORY_OPTIONS = ["Sprit", "Likör", "Mixer", "Juice & Syrup", "Bitters & Smaksättare", "Garnityr", "Övrigt"];
+const DEFAULT_INGREDIENT_TYPES = [
+  { id: "type-gin", type: "Gin", category: "Sprit" },
+  { id: "type-vodka", type: "Vodka", category: "Sprit" },
+  { id: "type-ljus-rom", type: "Ljus rom", category: "Sprit" },
+  { id: "type-mork-rom", type: "Mörk rom", category: "Sprit" },
+  { id: "type-whisky", type: "Whisky", category: "Sprit" },
+  { id: "type-bourbon", type: "Bourbon", category: "Sprit" },
+  { id: "type-tequila", type: "Tequila", category: "Sprit" },
+  { id: "type-cognac", type: "Cognac", category: "Sprit" },
+  { id: "type-campari", type: "Campari", category: "Likör" },
+  { id: "type-aperol", type: "Aperol", category: "Likör" },
+  { id: "type-kaffelikor", type: "Kaffelikör", category: "Likör" },
+  { id: "type-limoncello", type: "Limoncello", category: "Likör" },
+  { id: "type-galliano", type: "Galliano", category: "Likör" },
+  { id: "type-triple-sec", type: "Triple sec", category: "Likör" },
+  { id: "type-cointreau", type: "Cointreau", category: "Likör" },
+  { id: "type-sot-vermouth", type: "Söt vermouth", category: "Likör" },
+  { id: "type-torr-vermouth", type: "Torr vermouth", category: "Likör" },
+  { id: "type-tonic", type: "Tonic", category: "Mixer" },
+  { id: "type-sodavatten", type: "Sodavatten", category: "Mixer" },
+  { id: "type-ginger-beer", type: "Ginger Beer", category: "Mixer" },
+  { id: "type-cola", type: "Cola", category: "Mixer" },
+  { id: "type-espresso", type: "Espresso", category: "Mixer" },
+  { id: "type-limejuice", type: "Limejuice", category: "Juice & Syrup" },
+  { id: "type-citronjuice", type: "Citronjuice", category: "Juice & Syrup" },
+  { id: "type-sockerlag", type: "Sockerlag", category: "Juice & Syrup" },
+  { id: "type-angostura-bitters", type: "Angostura bitters", category: "Bitters & Smaksättare" },
+  { id: "type-apelsinzest", type: "Apelsinzest", category: "Garnityr" },
+  { id: "type-cocktailbar", type: "Cocktailbär", category: "Garnityr" },
+  { id: "type-oliver", type: "Oliver", category: "Garnityr" }
 ];
-const INGREDIENT_CATEGORIES = [...new Set(INGREDIENT_TYPES.map((entry) => entry.category))];
 const VOLUME_UNITS = new Map([
   ["ml", 0.1],
   ["cl", 1],
   ["l", 100],
   ["liter", 100]
 ]);
+let ingredientTypesStore = loadIngredientTypes();
 
 const demoData = {
   inventory: [
@@ -62,6 +70,7 @@ const demoData = {
 
 const state = {
   data: loadData(),
+  ingredientTypes: ingredientTypesStore,
   filters: {
     location: "all",
     category: "all",
@@ -71,11 +80,13 @@ const state = {
 };
 
 const els = {};
+let pendingRestore = null;
 
 document.addEventListener("DOMContentLoaded", () => {
   bindElements();
   restorePanelState();
   populateIngredientTypeSelect(els.inventoryType);
+  populateCategorySelect(els.newTypeCategory);
   bindEvents();
   render();
   registerServiceWorker();
@@ -102,7 +113,10 @@ function bindElements() {
     "inventoryAmount", "inventoryUnit", "inventoryLocation", "inventoryFormMode",
     "resetInventoryForm", "recipeForm", "recipeId", "recipeName",
     "recipeIngredientRows", "addRecipeIngredient", "recipeInstructions", "recipeSourceUrl", "recipeFormMode",
-    "resetRecipeForm", "exportBtn", "importInput", "emptyTemplate", "toast"
+    "resetRecipeForm", "typeForm", "newTypeName", "newTypeCategory", "typeSummaryText", "resetTypeForm",
+    "exportBtn", "importInput", "emptyTemplate", "toast", "debugInventoryCount", "debugRecipeCount",
+    "debugTypeCount", "restoreLog", "backupSummaryText", "lastExportedAt", "lastRestoredAt", "restoreBtn",
+    "restoreDialog", "confirmRestoreBtn", "cancelRestoreBtn"
   ].forEach((id) => {
     els[id] = document.getElementById(id);
   });
@@ -136,11 +150,17 @@ function bindEvents() {
 
   els.inventoryForm.addEventListener("submit", saveInventoryFromForm);
   els.recipeForm.addEventListener("submit", saveRecipeFromForm);
+  els.typeForm.addEventListener("submit", saveTypeFromForm);
   els.addRecipeIngredient.addEventListener("click", () => addRecipeIngredientRow());
   els.resetInventoryForm.addEventListener("click", resetInventoryForm);
   els.resetRecipeForm.addEventListener("click", resetRecipeForm);
+  els.resetTypeForm.addEventListener("click", resetTypeForm);
   els.exportBtn.addEventListener("click", exportData);
+  els.restoreBtn.addEventListener("click", () => els.importInput.click());
   els.importInput.addEventListener("change", importData);
+  els.confirmRestoreBtn.addEventListener("click", applyPendingRestore);
+  els.cancelRestoreBtn.addEventListener("click", clearPendingRestore);
+  els.restoreDialog.addEventListener("cancel", clearPendingRestore);
   addRecipeIngredientRow();
 }
 
@@ -149,7 +169,12 @@ function loadData() {
   if (!saved) return cloneData(demoData);
 
   try {
-    return normalizeData(JSON.parse(saved));
+    const parsed = JSON.parse(saved);
+    if (Array.isArray(parsed.ingredientTypes)) {
+      ingredientTypesStore = normalizeIngredientTypes(parsed.ingredientTypes);
+      localStorage.setItem(TYPE_STORAGE_KEY, JSON.stringify(ingredientTypesStore));
+    }
+    return normalizeData(parsed);
   } catch {
     return cloneData(demoData);
   }
@@ -157,6 +182,29 @@ function loadData() {
 
 function persist() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state.data));
+}
+
+function loadIngredientTypes() {
+  const saved = localStorage.getItem(TYPE_STORAGE_KEY);
+  if (saved) {
+    try {
+      return normalizeIngredientTypes(JSON.parse(saved));
+    } catch {
+      return seedIngredientTypes();
+    }
+  }
+  return seedIngredientTypes();
+}
+
+function seedIngredientTypes() {
+  const seeded = normalizeIngredientTypes(DEFAULT_INGREDIENT_TYPES);
+  localStorage.setItem(TYPE_STORAGE_KEY, JSON.stringify(seeded));
+  return seeded;
+}
+
+function persistIngredientTypes() {
+  state.ingredientTypes = ingredientTypesStore;
+  localStorage.setItem(TYPE_STORAGE_KEY, JSON.stringify(ingredientTypesStore));
 }
 
 function restorePanelState() {
@@ -193,6 +241,8 @@ function render() {
   renderStats();
   renderInventory();
   renderRecipes();
+  renderSystemInfo();
+  renderBackupStatus();
 }
 
 function renderStats() {
@@ -202,18 +252,33 @@ function renderStats() {
   els.makeableCount.textContent = recipeStatuses.filter((status) => status.canMake).length;
   els.inventorySummaryText.textContent = `${state.data.inventory.length} ingredienser`;
   els.recipeSummaryText.textContent = `${state.data.recipes.length} recept`;
+  els.typeSummaryText.textContent = `${ingredientTypesStore.length} typer`;
+}
+
+function renderSystemInfo() {
+  const savedData = readJson(STORAGE_KEY, { inventory: [], recipes: [] });
+  const savedTypes = readJson(TYPE_STORAGE_KEY, []);
+  els.debugInventoryCount.textContent = Array.isArray(savedData.inventory) ? savedData.inventory.length : 0;
+  els.debugRecipeCount.textContent = Array.isArray(savedData.recipes) ? savedData.recipes.length : 0;
+  els.debugTypeCount.textContent = Array.isArray(savedTypes) ? savedTypes.length : 0;
+}
+
+function renderBackupStatus() {
+  els.lastExportedAt.textContent = formatStoredDate(localStorage.getItem(LAST_EXPORTED_KEY));
+  els.lastRestoredAt.textContent = formatStoredDate(localStorage.getItem(LAST_RESTORED_KEY));
+  els.backupSummaryText.textContent = `${state.data.inventory.length} lager, ${state.data.recipes.length} recept`;
 }
 
 function syncCategoryFilter() {
   const current = els.filterCategory.value;
-  els.filterCategory.replaceChildren(option("all", "Alla"), ...INGREDIENT_CATEGORIES.map((category) => option(category, category)));
-  els.filterCategory.value = INGREDIENT_CATEGORIES.includes(current) ? current : "all";
+  els.filterCategory.replaceChildren(option("all", "Alla"), ...CATEGORY_OPTIONS.map((category) => option(category, category)));
+  els.filterCategory.value = CATEGORY_OPTIONS.includes(current) ? current : "all";
   state.filters.category = els.filterCategory.value;
 }
 
 function syncTypeFilter() {
   const current = els.filterType.value;
-  const types = [...new Set(state.data.inventory.map((entry) => normalizeLabel(entry.type)))].sort(sortSv);
+  const types = ingredientTypesStore.map((entry) => entry.type);
   els.filterType.replaceChildren(option("all", "Alla"), ...types.map((type) => option(type, formatTypeLabel(type))));
   els.filterType.value = types.includes(current) ? current : "all";
   state.filters.type = els.filterType.value;
@@ -492,6 +557,28 @@ function saveRecipeFromForm(event) {
   resetRecipeForm();
 }
 
+function saveTypeFromForm(event) {
+  event.preventDefault();
+  const type = normalizeLabel(els.newTypeName.value);
+  const category = els.newTypeCategory.value;
+
+  if (!type || !CATEGORY_OPTIONS.includes(category)) return;
+  if (isKnownIngredientType(type)) {
+    showToast("Typen finns redan.");
+    return;
+  }
+
+  ingredientTypesStore = normalizeIngredientTypes([
+    ...ingredientTypesStore,
+    { id: createTypeId(type), type, category }
+  ]);
+  persistIngredientTypes();
+  refreshTypeControls();
+  render();
+  resetTypeForm();
+  showToast("Typ tillagd.");
+}
+
 function updateInventory(id, patch, message = "Ingrediens uppdaterad.") {
   state.data.inventory = state.data.inventory.map((entry) => entry.id === id ? { ...entry, ...patch } : entry);
   persistAndRender(message);
@@ -561,6 +648,18 @@ function resetRecipeForm() {
   els.recipeFormMode.textContent = "Nytt recept";
 }
 
+function resetTypeForm() {
+  els.typeForm.reset();
+  populateCategorySelect(els.newTypeCategory);
+}
+
+function refreshTypeControls() {
+  const inventoryType = els.inventoryType.value;
+  populateIngredientTypeSelect(els.inventoryType, inventoryType);
+  const recipeIngredients = collectRecipeIngredients();
+  setRecipeIngredientRows(recipeIngredients);
+}
+
 function persistAndRender(message) {
   persist();
   render();
@@ -568,7 +667,8 @@ function persistAndRender(message) {
 }
 
 function exportData() {
-  const blob = new Blob([JSON.stringify(state.data, null, 2)], { type: "application/json" });
+  const backup = createBackup();
+  const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -577,7 +677,9 @@ function exportData() {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
-  showToast("Backup exporterad.");
+  localStorage.setItem(LAST_EXPORTED_KEY, new Date().toISOString());
+  renderBackupStatus();
+  showBackupMessage("Backup skapad", backup, backup.ingredientTypes);
 }
 
 function importData(event) {
@@ -587,21 +689,124 @@ function importData(event) {
   const reader = new FileReader();
   reader.addEventListener("load", () => {
     try {
-      const imported = normalizeData(JSON.parse(reader.result));
-      if (!isReasonableData(imported)) throw new Error("Invalid Cocktails data");
-      if (!confirm("Import skriver över befintlig Cocktails-data. Fortsätta?")) return;
-
-      state.data = imported;
-      persistAndRender("Backup importerad.");
-      resetInventoryForm();
-      resetRecipeForm();
+      const imported = normalizeBackup(JSON.parse(reader.result));
+      if (!isReasonableData(imported.data)) throw new Error("Invalid Cocktails data");
+      pendingRestore = imported;
+      showRestoreDialog();
     } catch {
-      alert("Kunde inte importera filen. Kontrollera att det är en Cocktails JSON-backup.");
+      alert("Kunde inte läsa backupfilen. Kontrollera att det är en Cocktails JSON-backup.");
     } finally {
       event.target.value = "";
     }
   });
   reader.readAsText(file);
+}
+
+function createBackup() {
+  return {
+    inventory: state.data.inventory,
+    recipes: state.data.recipes,
+    settings: {
+      panels: readJson(PANEL_KEY, {})
+    },
+    ingredientTypes: ingredientTypesStore
+  };
+}
+
+function showRestoreDialog() {
+  if (typeof els.restoreDialog.showModal === "function") {
+    els.restoreDialog.showModal();
+    return;
+  }
+
+  const confirmed = confirm([
+    "Denna åtgärd ersätter all lokal data med innehållet i backupfilen.",
+    "",
+    "Detta kommer att ersätta:",
+    "",
+    "* Lager",
+    "* Recept",
+    "* Typer",
+    "* Inställningar"
+  ].join("\n"));
+  if (confirmed) applyPendingRestore();
+  else clearPendingRestore();
+}
+
+function applyPendingRestore(event) {
+  if (event) event.preventDefault();
+  if (!pendingRestore) return;
+
+  const imported = pendingRestore;
+  clearPendingRestore();
+  if (els.restoreDialog.open) els.restoreDialog.close();
+  restoreBackup(imported);
+}
+
+function clearPendingRestore() {
+  pendingRestore = null;
+}
+
+function restoreBackup(imported) {
+  ingredientTypesStore = imported.ingredientTypes;
+  persistIngredientTypes();
+
+  state.data = imported.data;
+  persist();
+
+  localStorage.setItem(PANEL_KEY, JSON.stringify(imported.settings.panels || {}));
+  restorePanelState();
+
+  localStorage.setItem(LAST_RESTORED_KEY, new Date().toISOString());
+  resetInventoryForm();
+  resetRecipeForm();
+  resetTypeForm();
+  refreshTypeControls();
+  render();
+  showRestoreLog(imported.data, imported.ingredientTypes);
+}
+
+function normalizeBackup(data) {
+  const ingredientTypes = Array.isArray(data.ingredientTypes)
+    ? normalizeIngredientTypes(data.ingredientTypes)
+    : ingredientTypesStore;
+  const previousTypes = ingredientTypesStore;
+  ingredientTypesStore = ingredientTypes;
+  const normalizedData = normalizeData(data);
+  ingredientTypesStore = previousTypes;
+
+  return {
+    data: normalizedData,
+    ingredientTypes,
+    settings: data.settings && typeof data.settings === "object" ? data.settings : {}
+  };
+}
+
+function showRestoreLog(data, ingredientTypes) {
+  showBackupMessage("Backup inläst", data, ingredientTypes);
+}
+
+function showBackupMessage(title, data, ingredientTypes) {
+  const message = [
+    title,
+    "",
+    `Inventory: ${data.inventory.length}`,
+    `Recipes: ${data.recipes.length}`,
+    `Ingredient Types: ${ingredientTypes.length}`
+  ].join("\n");
+  els.restoreLog.textContent = message;
+  els.restoreLog.hidden = false;
+  showToast(message);
+}
+
+function formatStoredDate(value) {
+  if (!value) return "Aldrig";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Aldrig";
+  return date.toLocaleString("sv-SE", {
+    dateStyle: "short",
+    timeStyle: "short"
+  });
 }
 
 function normalizeData(data) {
@@ -700,7 +905,7 @@ function populateIngredientTypeSelect(select, selectedType = "") {
   const normalizedSelectedType = normalizeIngredientType(selectedType);
   const options = [
     option("", "Välj typ"),
-    ...INGREDIENT_TYPES.map((entry) => option(entry.type, entry.type))
+    ...ingredientTypesStore.map((entry) => option(entry.type, entry.type))
   ];
 
   if (normalizedSelectedType && !isKnownIngredientType(normalizedSelectedType)) {
@@ -711,6 +916,11 @@ function populateIngredientTypeSelect(select, selectedType = "") {
 
   select.replaceChildren(...options);
   select.value = normalizedSelectedType;
+}
+
+function populateCategorySelect(select, selectedCategory = CATEGORY_OPTIONS[0]) {
+  select.replaceChildren(...CATEGORY_OPTIONS.map((category) => option(category, category)));
+  select.value = CATEGORY_OPTIONS.includes(selectedCategory) ? selectedCategory : "Övrigt";
 }
 
 function isKnownIngredientType(type) {
@@ -727,7 +937,33 @@ function getIngredientCategory(type) {
 }
 
 function formatCategoryLabel(category) {
-  return INGREDIENT_CATEGORIES.includes(category) ? category : "Okänd kategori";
+  return CATEGORY_OPTIONS.includes(category) ? category : "Okänd kategori";
+}
+
+function normalizeIngredientTypes(entries) {
+  const seen = new Set();
+  return (Array.isArray(entries) ? entries : [])
+    .map((entry) => ({
+      id: String(entry.id || createTypeId(entry.type)),
+      type: normalizeLabel(entry.type),
+      category: CATEGORY_OPTIONS.includes(entry.category) ? entry.category : "Övrigt"
+    }))
+    .filter((entry) => {
+      const key = normalizeKey(entry.type);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => sortSv(a.category, b.category) || sortSv(a.type, b.type));
+}
+
+function createTypeId(type) {
+  const slug = normalizeKey(type)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  return slug ? `type-${slug}` : createId();
 }
 
 function el(tag, className) {
@@ -765,7 +1001,7 @@ function getCanonicalIngredientType(value) {
 
 function getIngredientDefinition(value) {
   const key = normalizeKey(value);
-  return INGREDIENT_TYPES.find((entry) => normalizeKey(entry.type) === key) || null;
+  return ingredientTypesStore.find((entry) => normalizeKey(entry.type) === key) || null;
 }
 
 function normalizeUnit(value) {
@@ -833,5 +1069,11 @@ function escapeAttr(value) {
 
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
+  if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
+    navigator.serviceWorker.getRegistrations()
+      .then((registrations) => registrations.forEach((registration) => registration.unregister()))
+      .catch(() => {});
+    return;
+  }
   navigator.serviceWorker.register("service-worker.js").catch(() => {});
 }
