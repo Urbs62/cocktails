@@ -1,6 +1,6 @@
 {
-  "name": "COCKTAIL",
-  "short_name": "COCKTAIL",
+  "name": "Cocktails",
+  "short_name": "Cocktails",
   "description": "Offline barskåp och recept för cocktails hemma och i stugan.",
   "start_url": "./",
   "scope": "./",
