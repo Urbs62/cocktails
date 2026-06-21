@@ -116,7 +116,7 @@ function bindElements() {
     "resetRecipeForm", "typeForm", "newTypeName", "newTypeCategory", "typeSummaryText", "resetTypeForm",
     "exportBtn", "importInput", "emptyTemplate", "toast", "debugInventoryCount", "debugRecipeCount",
     "debugTypeCount", "restoreLog", "backupSummaryText", "lastExportedAt", "lastRestoredAt", "restoreBtn",
-    "restoreDialog", "confirmRestoreBtn", "cancelRestoreBtn"
+    "restoreDialog", "confirmRestoreBtn", "cancelRestoreBtn", "structureSummaryText", "structureReport"
   ].forEach((id) => {
     els[id] = document.getElementById(id);
   });
@@ -243,6 +243,7 @@ function render() {
   renderRecipes();
   renderSystemInfo();
   renderBackupStatus();
+  renderStructure();
 }
 
 function renderStats() {
@@ -267,6 +268,104 @@ function renderBackupStatus() {
   els.lastExportedAt.textContent = formatStoredDate(localStorage.getItem(LAST_EXPORTED_KEY));
   els.lastRestoredAt.textContent = formatStoredDate(localStorage.getItem(LAST_RESTORED_KEY));
   els.backupSummaryText.textContent = `${state.data.inventory.length} lager, ${state.data.recipes.length} recept`;
+}
+
+function renderStructure() {
+  const inventoryCounts = countInventoryByType();
+  const recipeCounts = countRecipesByType();
+  const knownKeys = new Set(ingredientTypesStore.map((entry) => normalizeKey(entry.type)));
+  const categories = CATEGORY_OPTIONS.map((category) => ({
+    category,
+    types: ingredientTypesStore
+      .filter((entry) => entry.category === category)
+      .map((entry) => createStructureRow(entry.type, inventoryCounts, recipeCounts, true))
+  }));
+  const unknownTypes = new Map();
+
+  state.data.inventory.forEach((entry) => {
+    const key = normalizeKey(entry.type);
+    if (key && !knownKeys.has(key)) unknownTypes.set(key, normalizeLabel(entry.type));
+  });
+  state.data.recipes.forEach((recipeEntry) => {
+    recipeEntry.ingredients.forEach((recipeIngredient) => {
+      const key = normalizeKey(recipeIngredient.type);
+      if (key && !knownKeys.has(key)) unknownTypes.set(key, normalizeLabel(recipeIngredient.type));
+    });
+  });
+
+  const unknownRows = [...unknownTypes.values()]
+    .map((type) => createStructureRow(type, inventoryCounts, recipeCounts, false))
+    .sort((a, b) => sortSv(a.type, b.type));
+  const unusedCount = categories.flatMap((group) => group.types)
+    .filter((row) => row.inventoryCount === 0 && row.recipeCount === 0).length;
+  const issueCount = unusedCount + unknownRows.length;
+
+  els.structureSummaryText.textContent = issueCount
+    ? `${ingredientTypesStore.length} typer, ${issueCount} att granska`
+    : `${ingredientTypesStore.length} typer`;
+  els.structureReport.replaceChildren(
+    ...categories.map(renderStructureCategory),
+    ...(unknownRows.length ? [renderStructureCategory({ category: "Saknas i ingredientTypes", types: unknownRows }, true)] : [])
+  );
+}
+
+function countInventoryByType() {
+  const counts = new Map();
+  state.data.inventory.forEach((entry) => {
+    const key = normalizeKey(entry.type);
+    if (key) counts.set(key, (counts.get(key) || 0) + 1);
+  });
+  return counts;
+}
+
+function countRecipesByType() {
+  const counts = new Map();
+  state.data.recipes.forEach((recipeEntry) => {
+    const typesInRecipe = new Set(recipeEntry.ingredients.map((entry) => normalizeKey(entry.type)).filter(Boolean));
+    typesInRecipe.forEach((key) => counts.set(key, (counts.get(key) || 0) + 1));
+  });
+  return counts;
+}
+
+function createStructureRow(type, inventoryCounts, recipeCounts, isKnown) {
+  const key = normalizeKey(type);
+  return {
+    type,
+    isKnown,
+    inventoryCount: inventoryCounts.get(key) || 0,
+    recipeCount: recipeCounts.get(key) || 0
+  };
+}
+
+function renderStructureCategory(group, isUnknownGroup = false) {
+  const section = el("section", `structure-category${isUnknownGroup ? " structure-category-warn" : ""}`);
+  const heading = el("h2", "structure-category-title");
+  heading.innerHTML = `<span>${escapeHtml(group.category)}</span><small>${group.types.length} ${group.types.length === 1 ? "typ" : "typer"}</small>`;
+  const rows = el("div", "structure-types");
+  rows.append(...group.types.map(renderStructureRow));
+  section.append(heading, rows);
+  return section;
+}
+
+function renderStructureRow(row) {
+  const unused = row.isKnown && row.inventoryCount === 0 && row.recipeCount === 0;
+  const statuses = [];
+  if (unused) statuses.push("Oanvänd");
+  if (!row.isKnown && row.inventoryCount > 0) statuses.push("I lager, saknas i ingredientTypes");
+  if (!row.isKnown && row.recipeCount > 0) statuses.push("I recept, saknas i ingredientTypes");
+
+  const node = el("div", `structure-row${statuses.length ? " has-warning" : ""}`);
+  node.innerHTML = `
+    <div class="structure-type">
+      <strong>${escapeHtml(row.type)}</strong>
+      ${statuses.map((status) => `<span class="structure-warning">${escapeHtml(status)}</span>`).join("")}
+    </div>
+    <dl class="structure-counts">
+      <div><dt>Lagerposter</dt><dd>${row.inventoryCount}</dd></div>
+      <div><dt>Recept</dt><dd>${row.recipeCount}</dd></div>
+    </dl>
+  `;
+  return node;
 }
 
 function syncCategoryFilter() {
