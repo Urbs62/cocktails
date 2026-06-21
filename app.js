@@ -3,8 +3,19 @@ const TYPE_STORAGE_KEY = "ingredientTypes";
 const PANEL_KEY = "cocktails:panels:v1";
 const LAST_EXPORTED_KEY = "cocktails:backup:lastExportedAt";
 const LAST_RESTORED_KEY = "cocktails:backup:lastRestoredAt";
+const VERMOUTH_CATEGORY_MIGRATION_KEY = "cocktails:migration:vermouth-category:v1";
 const LOCATIONS = ["Hemma", "Stugan"];
-const CATEGORY_OPTIONS = ["Sprit", "Likör", "Mixer", "Juice & Syrup", "Bitters & Smaksättare", "Garnityr", "Övrigt"];
+const CATEGORY_OPTIONS = ["Sprit", "Likör", "Vermouth & Starkvin", "Mixer", "Juice & Syrup", "Bitters & Smaksättare", "Garnityr", "Övrigt"];
+const VERMOUTH_CATEGORY = "Vermouth & Starkvin";
+const VERMOUTH_TYPE_KEYS = new Set([
+  "Söt vermouth",
+  "Torr vermouth",
+  "Madeira",
+  "Portvin",
+  "Martini Rosso",
+  "Martini Extra Dry",
+  "Martini Bianco"
+].map(normalizeKey));
 const DEFAULT_INGREDIENT_TYPES = [
   { id: "type-gin", type: "Gin", category: "Sprit" },
   { id: "type-vodka", type: "Vodka", category: "Sprit" },
@@ -21,8 +32,8 @@ const DEFAULT_INGREDIENT_TYPES = [
   { id: "type-galliano", type: "Galliano", category: "Likör" },
   { id: "type-triple-sec", type: "Triple sec", category: "Likör" },
   { id: "type-cointreau", type: "Cointreau", category: "Likör" },
-  { id: "type-sot-vermouth", type: "Söt vermouth", category: "Likör" },
-  { id: "type-torr-vermouth", type: "Torr vermouth", category: "Likör" },
+  { id: "type-sot-vermouth", type: "Söt vermouth", category: "Vermouth & Starkvin" },
+  { id: "type-torr-vermouth", type: "Torr vermouth", category: "Vermouth & Starkvin" },
   { id: "type-tonic", type: "Tonic", category: "Mixer" },
   { id: "type-sodavatten", type: "Sodavatten", category: "Mixer" },
   { id: "type-ginger-beer", type: "Ginger Beer", category: "Mixer" },
@@ -192,7 +203,8 @@ function loadIngredientTypes() {
   const saved = localStorage.getItem(TYPE_STORAGE_KEY);
   if (saved) {
     try {
-      return normalizeIngredientTypes(JSON.parse(saved));
+      const normalized = normalizeIngredientTypesBase(JSON.parse(saved));
+      return migrateVermouthCategoryOnce(normalized);
     } catch {
       return seedIngredientTypes();
     }
@@ -201,9 +213,52 @@ function loadIngredientTypes() {
 }
 
 function seedIngredientTypes() {
-  const seeded = normalizeIngredientTypes(DEFAULT_INGREDIENT_TYPES);
+  const seeded = migrateVermouthCategoryOnce(normalizeIngredientTypesBase(DEFAULT_INGREDIENT_TYPES));
   localStorage.setItem(TYPE_STORAGE_KEY, JSON.stringify(seeded));
   return seeded;
+}
+
+function migrateVermouthCategoryOnce(entries) {
+  const migrated = applyVermouthCategory(entries);
+  if (localStorage.getItem(VERMOUTH_CATEGORY_MIGRATION_KEY)) return migrated;
+
+  const storedData = readJson(STORAGE_KEY, { inventory: [], recipes: [] });
+  const before = {
+    inventory: Array.isArray(storedData.inventory) ? storedData.inventory.length : 0,
+    recipes: Array.isArray(storedData.recipes) ? storedData.recipes.length : 0,
+    ingredientTypes: entries.length
+  };
+  const movedTypes = entries
+    .filter((entry) => VERMOUTH_TYPE_KEYS.has(normalizeKey(entry.type)) && entry.category !== VERMOUTH_CATEGORY)
+    .map((entry) => entry.type);
+
+  if (migrated.length !== before.ingredientTypes) throw new Error("Ingredient type migration changed type count");
+
+  localStorage.setItem(TYPE_STORAGE_KEY, JSON.stringify(migrated));
+  const storedDataAfter = readJson(STORAGE_KEY, { inventory: [], recipes: [] });
+  const storedTypesAfter = readJson(TYPE_STORAGE_KEY, []);
+  const after = {
+    inventory: Array.isArray(storedDataAfter.inventory) ? storedDataAfter.inventory.length : 0,
+    recipes: Array.isArray(storedDataAfter.recipes) ? storedDataAfter.recipes.length : 0,
+    ingredientTypes: Array.isArray(storedTypesAfter) ? storedTypesAfter.length : 0
+  };
+  if (after.inventory !== before.inventory || after.recipes !== before.recipes || after.ingredientTypes !== before.ingredientTypes) {
+    throw new Error("Vermouth category migration changed data counts");
+  }
+
+  localStorage.setItem(VERMOUTH_CATEGORY_MIGRATION_KEY, JSON.stringify({
+    completedAt: new Date().toISOString(),
+    movedTypes,
+    before,
+    after
+  }));
+  return migrated;
+}
+
+function applyVermouthCategory(entries) {
+  return entries.map((entry) => VERMOUTH_TYPE_KEYS.has(normalizeKey(entry.type))
+    ? { ...entry, category: VERMOUTH_CATEGORY }
+    : entry);
 }
 
 function persistIngredientTypes() {
@@ -1149,6 +1204,10 @@ function formatCategoryLabel(category) {
 }
 
 function normalizeIngredientTypes(entries) {
+  return applyVermouthCategory(normalizeIngredientTypesBase(entries));
+}
+
+function normalizeIngredientTypesBase(entries) {
   const seen = new Set();
   return (Array.isArray(entries) ? entries : [])
     .map((entry) => ({
