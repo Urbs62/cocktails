@@ -1170,9 +1170,25 @@ function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
   if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
     navigator.serviceWorker.getRegistrations()
-      .then((registrations) => registrations.forEach((registration) => registration.unregister()))
+      .then((registrations) => Promise.all(registrations.map((registration) => registration.unregister())))
+      .then(() => {
+        const reloadKey = "cocktails:dev-sw-reload";
+        if (navigator.serviceWorker.controller && !sessionStorage.getItem(reloadKey)) {
+          sessionStorage.setItem(reloadKey, "true");
+          location.reload();
+          return;
+        }
+        sessionStorage.removeItem(reloadKey);
+      })
       .catch(() => {});
     return;
   }
-  navigator.serviceWorker.register("service-worker.js").catch(() => {});
+
+  let reloadingForUpdate = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (reloadingForUpdate) return;
+    reloadingForUpdate = true;
+    location.reload();
+  });
+  navigator.serviceWorker.register("service-worker.js", { updateViaCache: "none" }).catch(() => {});
 }

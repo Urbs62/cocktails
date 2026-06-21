@@ -1,4 +1,4 @@
-const CACHE_NAME = "cocktails-v19";
+const CACHE_NAME = "cocktails-v20";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -28,6 +28,11 @@ self.addEventListener("fetch", (event) => {
 
   if (event.request.mode === "navigate") {
     event.respondWith(networkFirst(event.request, "./index.html"));
+    return;
+  }
+
+  if (event.request.url.startsWith(self.location.origin)) {
+    event.respondWith(networkFirst(event.request, event.request));
     return;
   }
 
