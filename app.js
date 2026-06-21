@@ -116,7 +116,8 @@ function bindElements() {
     "resetRecipeForm", "typeForm", "newTypeName", "newTypeCategory", "typeSummaryText", "resetTypeForm",
     "exportBtn", "importInput", "emptyTemplate", "toast", "debugInventoryCount", "debugRecipeCount",
     "debugTypeCount", "restoreLog", "backupSummaryText", "lastExportedAt", "lastRestoredAt", "restoreBtn",
-    "restoreDialog", "confirmRestoreBtn", "cancelRestoreBtn", "structureSummaryText", "structureReport"
+    "restoreDialog", "confirmRestoreBtn", "cancelRestoreBtn", "structureSummaryText", "structureReport",
+    "printSummaryText", "togglePrintPreview", "printInventoryBtn", "printPreview"
   ].forEach((id) => {
     els[id] = document.getElementById(id);
   });
@@ -161,6 +162,9 @@ function bindEvents() {
   els.confirmRestoreBtn.addEventListener("click", applyPendingRestore);
   els.cancelRestoreBtn.addEventListener("click", clearPendingRestore);
   els.restoreDialog.addEventListener("cancel", clearPendingRestore);
+  els.togglePrintPreview.addEventListener("click", togglePrintPreview);
+  els.printInventoryBtn.addEventListener("click", printInventory);
+  window.addEventListener("beforeprint", prepareInventoryPrint);
   addRecipeIngredientRow();
 }
 
@@ -244,6 +248,7 @@ function render() {
   renderSystemInfo();
   renderBackupStatus();
   renderStructure();
+  renderPrintInventory();
 }
 
 function renderStats() {
@@ -366,6 +371,108 @@ function renderStructureRow(row) {
     </dl>
   `;
   return node;
+}
+
+function togglePrintPreview() {
+  const willShow = els.printPreview.hidden;
+  els.printPreview.hidden = !willShow;
+  els.togglePrintPreview.textContent = willShow ? "Dölj utskriftslista" : "Visa utskriftslista";
+  els.togglePrintPreview.setAttribute("aria-expanded", String(willShow));
+  if (willShow) renderPrintInventory();
+}
+
+function prepareInventoryPrint() {
+  els.printInventoryBtn.closest("details").open = true;
+  els.printPreview.hidden = false;
+  els.togglePrintPreview.textContent = "Dölj utskriftslista";
+  els.togglePrintPreview.setAttribute("aria-expanded", "true");
+  renderPrintInventory();
+}
+
+function printInventory() {
+  prepareInventoryPrint();
+  window.print();
+}
+
+function renderPrintInventory() {
+  const inventory = state.data.inventory.slice().sort(comparePrintableInventory);
+  const locationCounts = new Map(LOCATIONS.map((location) => [location, 0]));
+  inventory.forEach((entry) => locationCounts.set(entry.location, (locationCounts.get(entry.location) || 0) + 1));
+
+  els.printSummaryText.textContent = `${inventory.length} lagerposter`;
+  els.printPreview.replaceChildren();
+
+  const header = el("header", "print-header");
+  header.innerHTML = `
+    <h1>Lagerlista</h1>
+    <p>Utskriven: ${escapeHtml(formatPrintDate(new Date()))}</p>
+    <dl class="print-totals">
+      <div><dt>Totalt</dt><dd>${inventory.length}</dd></div>
+      <div><dt>Hemma</dt><dd>${locationCounts.get("Hemma") || 0}</dd></div>
+      <div><dt>Stugan</dt><dd>${locationCounts.get("Stugan") || 0}</dd></div>
+    </dl>
+  `;
+  els.printPreview.append(header);
+
+  if (!inventory.length) {
+    const empty = el("p", "print-empty");
+    empty.textContent = "Lagret är tomt.";
+    els.printPreview.append(empty);
+    return;
+  }
+
+  LOCATIONS.forEach((location) => {
+    const locationEntries = inventory.filter((entry) => entry.location === location);
+    if (!locationEntries.length) return;
+    els.printPreview.append(renderPrintLocation(location, locationEntries));
+  });
+}
+
+function comparePrintableInventory(a, b) {
+  return LOCATIONS.indexOf(a.location) - LOCATIONS.indexOf(b.location)
+    || categorySortIndex(a.category) - categorySortIndex(b.category)
+    || sortSv(a.category, b.category)
+    || sortSv(a.type, b.type)
+    || sortSv(a.name, b.name);
+}
+
+function categorySortIndex(category) {
+  const index = CATEGORY_OPTIONS.indexOf(category);
+  return index === -1 ? CATEGORY_OPTIONS.length : index;
+}
+
+function renderPrintLocation(location, entries) {
+  const section = el("section", "print-location");
+  const heading = el("h2");
+  heading.textContent = location;
+  section.append(heading);
+
+  const categories = [...new Set(entries.map((entry) => entry.category))];
+  categories.forEach((category) => {
+    const categorySection = el("section", "print-category");
+    const categoryHeading = el("h3");
+    categoryHeading.textContent = formatCategoryLabel(category);
+    const list = el("ul", "print-list");
+    list.append(...entries.filter((entry) => entry.category === category).map(renderPrintInventoryRow));
+    categorySection.append(categoryHeading, list);
+    section.append(categorySection);
+  });
+  return section;
+}
+
+function renderPrintInventoryRow(entry) {
+  const row = el("li");
+  const note = normalizeLabel(entry.note || entry.notes || entry.notering || "");
+  row.innerHTML = `
+    <span><strong>${escapeHtml(entry.type)}</strong> — ${escapeHtml(entry.name)} — ${escapeHtml(formatAmount(entry.amount))} ${escapeHtml(entry.unit)}</span>
+    ${note ? `<small>${escapeHtml(note)}</small>` : ""}
+  `;
+  return row;
+}
+
+function formatPrintDate(date) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function syncCategoryFilter() {
@@ -929,6 +1036,7 @@ function isReasonableData(data) {
 
 function sanitizeInventory(entry) {
   const type = normalizeIngredientType(entry.type || "Okänd");
+  const note = normalizeLabel(entry.note || entry.notes || entry.notering || "");
   return {
     id: String(entry.id || createId()),
     category: getIngredientCategory(type),
@@ -936,7 +1044,8 @@ function sanitizeInventory(entry) {
     name: String(entry.name || "Namnlös"),
     amount: Number(entry.amount || 0),
     unit: normalizeUnit(entry.unit || "st"),
-    location: LOCATIONS.includes(entry.location) ? entry.location : "Hemma"
+    location: LOCATIONS.includes(entry.location) ? entry.location : "Hemma",
+    ...(note ? { note } : {})
   };
 }
 

@@ -233,6 +233,20 @@
         </div>
       </details>
 
+      <details class="panel print-panel" data-panel-id="print-inventory">
+        <summary>
+          <span>Utskrift / PDF</span>
+          <small id="printSummaryText"></small>
+        </summary>
+        <div class="panel-body">
+          <div class="print-actions">
+            <button id="togglePrintPreview" type="button" aria-expanded="false">Visa utskriftslista</button>
+            <button class="primary" id="printInventoryBtn" type="button">Skriv ut / Spara som PDF</button>
+          </div>
+          <article class="print-preview" id="printPreview" aria-label="Utskrivbar lagerlista" hidden></article>
+        </div>
+      </details>
+
       <dialog class="restore-dialog" id="restoreDialog" aria-labelledby="restoreDialogTitle">
         <form method="dialog">
           <h2 id="restoreDialogTitle">Ersätt med backup?</h2>

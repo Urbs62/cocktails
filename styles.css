@@ -679,6 +679,105 @@ a {
   font-weight: 850;
 }
 
+.print-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.55rem;
+  padding-top: 0.85rem;
+}
+
+.print-preview {
+  margin-top: 0.8rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7f7f4;
+  color: #171717;
+}
+
+.print-header h1,
+.print-location h2,
+.print-category h3,
+.print-header p {
+  margin: 0;
+}
+
+.print-header h1 {
+  font-size: 1.45rem;
+}
+
+.print-header p {
+  margin-top: 0.2rem;
+  color: #555;
+  font-size: 0.78rem;
+}
+
+.print-totals {
+  display: flex;
+  gap: 1.25rem;
+  margin: 0.8rem 0 0;
+  padding: 0.6rem 0;
+  border-block: 1px solid #ccc;
+}
+
+.print-totals div {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+}
+
+.print-totals dt {
+  color: #555;
+  font-size: 0.72rem;
+}
+
+.print-totals dd {
+  margin: 0;
+  font-weight: 850;
+}
+
+.print-location {
+  margin-top: 1rem;
+}
+
+.print-location h2 {
+  padding-bottom: 0.25rem;
+  border-bottom: 2px solid #222;
+  font-size: 1.15rem;
+}
+
+.print-category {
+  margin-top: 0.65rem;
+  break-inside: avoid;
+}
+
+.print-category h3 {
+  font-size: 0.9rem;
+}
+
+.print-list {
+  display: grid;
+  gap: 0.14rem;
+  margin: 0.3rem 0 0;
+  padding-left: 1.15rem;
+  font-size: 0.78rem;
+}
+
+.print-list li {
+  padding-left: 0.1rem;
+  line-height: 1.35;
+}
+
+.print-list small {
+  display: block;
+  color: #555;
+  font-size: 0.7rem;
+}
+
+.print-empty {
+  margin-top: 1rem;
+}
+
 .restore-log {
   margin: 0.65rem 0 0;
   padding: 0.65rem;
@@ -748,7 +847,8 @@ a {
   }
 
   .backup-status,
-  .backup-buttons {
+  .backup-buttons,
+  .print-actions {
     grid-template-columns: 1fr 1fr;
   }
 
@@ -765,5 +865,60 @@ a {
   .editor-grid label:has(#recipeSourceUrl),
   .form-actions {
     grid-column: 1 / -1;
+  }
+}
+
+@media print {
+  @page {
+    margin: 12mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  .app-header,
+  .shell > :not(.print-panel),
+  .print-panel > summary,
+  .print-actions {
+    display: none !important;
+  }
+
+  .shell {
+    width: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  .print-panel {
+    display: block !important;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background: #fff;
+    box-shadow: none;
+    overflow: visible;
+  }
+
+  .print-panel .panel-body {
+    padding: 0;
+    border: 0;
+  }
+
+  .print-preview,
+  .print-preview[hidden] {
+    display: block !important;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  .print-location h2 {
+    break-after: avoid;
   }
 }
