@@ -1,6 +1,8 @@
 const STORAGE_KEY = "cocktails:data:v1";
 const TYPE_STORAGE_KEY = "ingredientTypes";
+const VARIANT_STORAGE_KEY = "cocktails:ingredientVariants:v1";
 const PANEL_KEY = "cocktails:panels:v1";
+const SHOPPING_LOCATION_KEY = "cocktails:shopping:location";
 const LAST_EXPORTED_KEY = "cocktails:backup:lastExportedAt";
 const LAST_RESTORED_KEY = "cocktails:backup:lastRestoredAt";
 const VERMOUTH_CATEGORY_MIGRATION_KEY = "cocktails:migration:vermouth-category:v1";
@@ -54,6 +56,7 @@ const VOLUME_UNITS = new Map([
   ["liter", 100]
 ]);
 let ingredientTypesStore = loadIngredientTypes();
+let ingredientVariantsStore = readJson(VARIANT_STORAGE_KEY, []);
 
 const demoData = {
   inventory: [
@@ -82,6 +85,7 @@ const demoData = {
 const state = {
   data: loadData(),
   ingredientTypes: ingredientTypesStore,
+  shoppingLocation: loadShoppingLocation(),
   filters: {
     location: "all",
     category: "all",
@@ -92,6 +96,7 @@ const state = {
 
 const els = {};
 let pendingRestore = null;
+let newIngredientTarget = null;
 
 document.addEventListener("DOMContentLoaded", () => {
   bindElements();
@@ -111,15 +116,16 @@ function recipe(name, category, ingredients, instructions, sourceUrl = "") {
   return { id: createId(), name, category, ingredients, instructions, sourceUrl };
 }
 
-function ingredient(type, amount = null, unit = "", optional = false) {
+function ingredient(type, amount = null, unit = "", optional = false, variantId = "") {
   const parsedAmount = amount === null || amount === "" ? null : Number(amount);
-  return { type: normalizeIngredientType(type), amount: parsedAmount, unit: normalizeUnit(unit), optional };
+  return { type: normalizeIngredientType(type), amount: parsedAmount, unit: normalizeUnit(unit), optional, ...(variantId ? { variantId: String(variantId) } : {}) };
 }
 
 function bindElements() {
   [
     "inventoryCount", "recipeCount", "makeableCount", "inventorySummaryText", "recipeSummaryText",
-    "filterLocation", "filterCategory", "filterType", "filterSearch", "typeSummary", "inventoryList", "recipeList",
+    "shoppingLocation", "shoppingCount", "shoppingList",
+    "filterLocation", "filterCategory", "filterType", "filterSearch", "typeSummary", "typeSummaryCount", "inventoryList", "recipeList",
     "inventoryForm", "inventoryId", "inventoryType", "inventoryName",
     "inventoryAmount", "inventoryUnit", "inventoryLocation", "inventoryFormMode",
     "resetInventoryForm", "recipeForm", "recipeId", "recipeName",
@@ -128,13 +134,23 @@ function bindElements() {
     "exportBtn", "importInput", "emptyTemplate", "toast", "debugInventoryCount", "debugRecipeCount",
     "debugTypeCount", "restoreLog", "backupSummaryText", "lastExportedAt", "lastRestoredAt", "restoreBtn",
     "restoreDialog", "confirmRestoreBtn", "cancelRestoreBtn", "structureSummaryText", "structureReport",
-    "printSummaryText", "togglePrintPreview", "printInventoryBtn", "printPreview"
+    "printSummaryText", "togglePrintPreview", "printInventoryBtn", "printPreview",
+    "inventoryVariant", "newInventoryVariant", "variantForm", "newVariantType", "newVariantName", "variantList",
+    "ingredientDialog", "ingredientDefinitionForm", "definitionType", "definitionTypeName",
+    "definitionCategory", "definitionVariantName", "definitionNewTypeFields", "cancelIngredientDefinition"
   ].forEach((id) => {
     els[id] = document.getElementById(id);
   });
 }
 
 function bindEvents() {
+  els.shoppingLocation.replaceChildren(...LOCATIONS.map((location) => option(location, location)));
+  els.shoppingLocation.value = state.shoppingLocation;
+  els.shoppingLocation.addEventListener("change", () => {
+    state.shoppingLocation = LOCATIONS.includes(els.shoppingLocation.value) ? els.shoppingLocation.value : LOCATIONS[0];
+    localStorage.setItem(SHOPPING_LOCATION_KEY, JSON.stringify(state.shoppingLocation));
+    renderShoppingList();
+  });
   els.filterLocation.addEventListener("change", () => {
     state.filters.location = els.filterLocation.value;
     renderInventory();
@@ -163,6 +179,16 @@ function bindEvents() {
   els.inventoryForm.addEventListener("submit", saveInventoryFromForm);
   els.recipeForm.addEventListener("submit", saveRecipeFromForm);
   els.typeForm.addEventListener("submit", saveTypeFromForm);
+  els.variantForm.addEventListener("submit", saveVariantFromForm);
+  els.ingredientDefinitionForm.addEventListener("submit", saveIngredientDefinition);
+  els.definitionType.addEventListener("change", updateIngredientDefinitionMode);
+  els.cancelIngredientDefinition.addEventListener("click", closeIngredientDefinition);
+  els.ingredientDialog.addEventListener("close", () => { newIngredientTarget = null; });
+  els.inventoryType.addEventListener("change", () => populateVariantSelect(els.inventoryVariant, els.inventoryType.value));
+  els.newInventoryVariant.addEventListener("click", () => openIngredientDefinition(els.inventoryForm));
+  populateVariantSelect(els.inventoryVariant, els.inventoryType.value);
+  populateIngredientTypeSelect(els.newVariantType);
+  renderVariants();
   els.addRecipeIngredient.addEventListener("click", () => addRecipeIngredientRow());
   els.resetInventoryForm.addEventListener("click", resetInventoryForm);
   els.resetRecipeForm.addEventListener("click", resetRecipeForm);
@@ -189,14 +215,37 @@ function loadData() {
       ingredientTypesStore = normalizeIngredientTypes(parsed.ingredientTypes);
       localStorage.setItem(TYPE_STORAGE_KEY, JSON.stringify(ingredientTypesStore));
     }
-    return normalizeData(parsed);
+    if (Array.isArray(parsed.ingredientVariants)) ingredientVariantsStore = parsed.ingredientVariants;
+    const migrated = migrateIngredientStructure(parsed, ingredientTypesStore, ingredientVariantsStore);
+    const variants = simplifyIngredientVariants(migrated.data, migrated.variants);
+    const previousTypes = ingredientTypesStore;
+    ingredientTypesStore = migrated.types;
+    const data = normalizeData(migrated.data);
+    if (migrated.changed || variants !== ingredientVariantsStore) {
+      // Preserve snapshot metadata and all fields outside the explicit migration.
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...migrated.data,
+          ...(migrated.types !== previousTypes ? { ingredientTypes: migrated.types } : {}), ingredientVariants: variants }));
+      } catch {
+        ingredientTypesStore = previousTypes;
+        return normalizeData(parsed); // Failed migration writes must never replace user data with demo data.
+      }
+      try {
+        localStorage.setItem(VARIANT_STORAGE_KEY, JSON.stringify(variants));
+        localStorage.setItem(TYPE_STORAGE_KEY, JSON.stringify(migrated.types));
+      } catch { /* The complete authoritative snapshot above is already saved. */ }
+    }
+    ingredientVariantsStore = variants;
+    return data;
   } catch {
     return cloneData(demoData);
   }
 }
 
 function persist() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.data));
+  // One authoritative snapshot keeps records and their definitions consistent.
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state.data,
+    ingredientTypes: ingredientTypesStore, ingredientVariants: ingredientVariantsStore }));
 }
 
 function loadIngredientTypes() {
@@ -263,7 +312,7 @@ function applyVermouthCategory(entries) {
 
 function persistIngredientTypes() {
   state.ingredientTypes = ingredientTypesStore;
-  localStorage.setItem(TYPE_STORAGE_KEY, JSON.stringify(ingredientTypesStore));
+  persist();
 }
 
 function restorePanelState() {
@@ -296,10 +345,10 @@ function readJson(key, fallback) {
 
 function render() {
   syncCategoryFilter();
-  syncTypeFilter();
   renderStats();
   renderInventory();
   renderRecipes();
+  renderShoppingList();
   renderSystemInfo();
   renderBackupStatus();
   renderStructure();
@@ -539,15 +588,19 @@ function syncCategoryFilter() {
 
 function syncTypeFilter() {
   const current = els.filterType.value;
-  const types = ingredientTypesStore.map((entry) => entry.type);
-  els.filterType.replaceChildren(option("all", "Alla"), ...types.map((type) => option(type, formatTypeLabel(type))));
+  const types = [...new Set(state.data.inventory
+    .filter((entry) => state.filters.category === "all" || entry.category === state.filters.category)
+    .map((entry) => normalizeLabel(entry.type)).filter(Boolean))].sort(sortSv);
+  els.filterType.replaceChildren(option("all", "Alla typer"), ...types.map((type) => option(type, formatTypeLabel(type))));
   els.filterType.value = types.includes(current) ? current : "all";
   state.filters.type = els.filterType.value;
 }
 
 function renderInventory() {
+  syncTypeFilter();
   const entries = getFilteredInventory();
   const summary = summarizeByType(state.data.inventory);
+  els.typeSummaryCount.textContent = `(${summary.length} ${summary.length === 1 ? "typ" : "typer"})`;
   els.typeSummary.replaceChildren(...summary.map(renderTypeSummary));
   renderList(els.inventoryList, entries, renderInventoryCard);
   renderStats();
@@ -566,7 +619,7 @@ function getFilteredInventory() {
     .filter((entry) => state.filters.type === "all" || normalizeLabel(entry.type) === state.filters.type)
     .filter((entry) => {
       if (!state.filters.search) return true;
-      return [entry.name, entry.type].join(" ").toLowerCase().includes(state.filters.search);
+      return [entry.name, entry.type, entry.variantId ? variantLabel(entry.variantId) : ""].join(" ").toLowerCase().includes(state.filters.search);
     })
     .sort((a, b) => sortSv(a.type, b.type) || sortSv(a.name, b.name));
 }
@@ -618,7 +671,7 @@ function renderInventoryCard(entry) {
     <div class="card-head">
       <div class="card-title">
         <strong>${escapeHtml(entry.name)}</strong>
-        <span>${escapeHtml(formatTypeLabel(entry.type))}</span>
+        <span>${escapeHtml(formatTypeLabel(entry.type))}${entry.variantId ? ` · ${escapeHtml(variantLabel(entry.variantId))}` : ""}</span>
       </div>
       <span class="pill"><strong>${formatAmount(entry.amount)}</strong> ${escapeHtml(entry.unit)}</span>
     </div>
@@ -642,26 +695,75 @@ function renderInventoryCard(entry) {
   return card;
 }
 
+function loadShoppingLocation() {
+  const location = readJson(SHOPPING_LOCATION_KEY, LOCATIONS[0]);
+  return LOCATIONS.includes(location) ? location : LOCATIONS[0];
+}
+
+function getShoppingList(location) {
+  const missing = new Map();
+  state.data.recipes.forEach((recipe) => {
+    recipe.ingredients.forEach((requirement) => {
+      if (requirement.optional) return;
+      // Use the existing presence/variant rules, without quantities or unit constraints.
+      if (hasIngredient({ ...requirement, amount: null, unit: "" }, location)) return;
+      const key = JSON.stringify([normalizeKey(requirement.type), requirement.variantId || ""]);
+      if (!missing.has(key)) missing.set(key, {
+        type: requirement.type,
+        variantId: requirement.variantId || "",
+        label: `${formatTypeLabel(requirement.type)}${requirement.variantId ? ` / ${variantLabel(requirement.variantId)}` : ""}`,
+        recipes: new Set()
+      });
+      missing.get(key).recipes.add(recipe.name);
+    });
+  });
+  return [...missing.values()].map((entry) => ({ ...entry, recipes: [...entry.recipes].sort(sortSv) }))
+    .sort((a, b) => sortSv(a.label, b.label));
+}
+
+function renderShoppingList() {
+  const entries = getShoppingList(state.shoppingLocation);
+  els.shoppingCount.textContent = `(${entries.length} saknas)`;
+  els.shoppingList.replaceChildren(...entries.map((entry) => {
+    const card = el("div", "card shopping-item");
+    const name = el("strong");
+    name.textContent = entry.label;
+    const recipes = el("span", "muted");
+    recipes.textContent = entry.recipes.join(", ");
+    card.append(name, recipes);
+    return card;
+  }));
+  if (!entries.length) {
+    const message = el("p", "empty-state");
+    message.textContent = "Du har alla ingredienser för dina registrerade recept på denna plats.";
+    els.shoppingList.append(message);
+  }
+}
+
 function renderRecipeCard(entry) {
   const status = getRecipeStatus(entry);
-  const card = el("article", "card");
+  const card = el("details", "card recipe-card");
   card.innerHTML = `
-    <div class="card-head">
-      <div class="card-title">
-        <strong>${escapeHtml(entry.name)}</strong>
-        <span>${escapeHtml(entry.category)}</span>
-      </div>
+    <summary class="recipe-toggle">
+      <strong>${escapeHtml(entry.name)}</strong>
       <span class="pill ${status.canMake ? "ok" : "warn"}">${status.canMake ? "Kan göras" : "Saknar ingredienser"}</span>
-    </div>
+    </summary>
+    <div class="recipe-body">
     <div class="card-meta">
       ${entry.ingredients.map((recipeIngredient) => `<span class="pill ${isKnownIngredientType(recipeIngredient.type) ? "" : "warn"}">${escapeHtml(formatIngredient(recipeIngredient))}</span>`).join("")}
     </div>
     ${status.missing.length ? `<div class="missing">Saknas: ${status.missing.map(escapeHtml).join(", ")}</div>` : ""}
+    <div class="instructions">${entry.ingredients.map((requirement) => {
+      const alternatives = LOCATIONS.filter((place) => hasIngredient(requirement, place)).map((place) =>
+        `${place}: ${matchingInventory(requirement, place).map((product) => `${product.name} (${formatAmount(product.amount)} ${product.unit})`).join(", ")}`);
+      return alternatives.length ? `${escapeHtml(formatIngredient(requirement))} — ${alternatives.map(escapeHtml).join("; ")}` : "";
+    }).filter(Boolean).join("<br>")}</div>
     <div class="instructions">${escapeHtml(entry.instructions)}</div>
     <div class="card-actions ${entry.sourceUrl ? "three-actions" : "two-actions"}">
       ${entry.sourceUrl ? `<a class="action-link source-link" href="${escapeAttr(entry.sourceUrl)}" target="_blank" rel="noreferrer">Receptlänk</a>` : ""}
       <button type="button" data-action="edit">Ändra</button>
       <button class="danger" type="button" data-action="delete">Ta bort</button>
+    </div>
     </div>
   `;
 
@@ -671,20 +773,52 @@ function renderRecipeCard(entry) {
 }
 
 function getRecipeStatus(recipeEntry) {
+  const locations = LOCATIONS.filter((location) => canMakeAt(recipeEntry, location));
   const missing = recipeEntry.ingredients
     .filter((recipeIngredient) => !recipeIngredient.optional)
     .filter((recipeIngredient) => !hasIngredient(recipeIngredient))
     .map(formatIngredient);
 
-  return { canMake: missing.length === 0, missing };
+  if (!missing.length && !locations.length) missing.push("Ingredienserna räcker inte på samma lagerplats");
+  return { canMake: locations.length > 0, missing, locations };
 }
 
-function hasIngredient(recipeIngredient) {
-  if (!isKnownIngredientType(recipeIngredient.type)) return false;
+function canMakeAt(recipeEntry, location) {
+  const remaining = new Map(state.data.inventory.map((entry) => [entry.id,
+    VOLUME_UNITS.has(normalizeUnit(entry.unit)) ? toCl(Number(entry.amount), normalizeUnit(entry.unit)) : Number(entry.amount)]));
+  // Reserve specific variants first so generic requirements cannot consume them twice.
+  const requirements = recipeEntry.ingredients.filter((entry) => !entry.optional)
+    .slice().sort((a, b) => Number(Boolean(b.variantId)) - Number(Boolean(a.variantId)));
+  return requirements.every((requirement) => {
+    if (!isKnownIngredientType(requirement.type)) return false;
+    let needed = VOLUME_UNITS.has(normalizeUnit(requirement.unit))
+      ? toCl(requirement.amount, normalizeUnit(requirement.unit)) : requirement.amount;
+    const products = matchingInventory(requirement, location);
+    if (!needed) return products.some((entry) => remaining.get(entry.id) > 0);
+    for (const product of products) {
+      const used = Math.min(remaining.get(product.id), needed);
+      remaining.set(product.id, remaining.get(product.id) - used);
+      needed -= used;
+    }
+    return needed <= 1e-9;
+  });
+}
 
-  const matches = state.data.inventory.filter((entry) => (
-    entry.type === recipeIngredient.type && isKnownIngredientType(entry.type) && Number(entry.amount) > 0
-  ));
+function matchingInventory(recipeIngredient, location) {
+  const variant = ingredientVariantsStore.find((entry) => entry.id === recipeIngredient.variantId);
+  if (recipeIngredient.variantId && (!variant || normalizeKey(variant.type) !== normalizeKey(recipeIngredient.type))) return [];
+  return state.data.inventory.filter((entry) => normalizeKey(entry.type) === normalizeKey(recipeIngredient.type)
+    && (!recipeIngredient.variantId || entry.variantId === recipeIngredient.variantId)
+    && (!location || entry.location === location) && Number(entry.amount) > 0
+    && (normalizeUnit(entry.unit) === normalizeUnit(recipeIngredient.unit)
+      || (VOLUME_UNITS.has(normalizeUnit(entry.unit)) && VOLUME_UNITS.has(normalizeUnit(recipeIngredient.unit)))
+      || !recipeIngredient.unit));
+}
+
+function hasIngredient(recipeIngredient, location) {
+  if (!isKnownIngredientType(recipeIngredient.type)) return false;
+  if (!location) return LOCATIONS.some((place) => hasIngredient(recipeIngredient, place));
+  const matches = matchingInventory(recipeIngredient, location);
 
   if (!matches.length) return false;
   if (!recipeIngredient.amount || !recipeIngredient.unit) return true;
@@ -701,7 +835,7 @@ function hasIngredient(recipeIngredient) {
     return availableCl >= toCl(recipeIngredient.amount, wantedUnit);
   }
 
-  return matches.some((entry) => normalizeUnit(entry.unit) === wantedUnit);
+  return sumByUnit(matches, wantedUnit) >= recipeIngredient.amount;
 }
 
 function sumByUnit(entries, unit) {
@@ -716,6 +850,10 @@ function addRecipeIngredientRow(recipeIngredient = ingredient("", 1, "cl")) {
     <label>
       <span>Typ</span>
       <select data-field="type" required></select>
+    </label>
+    <label class="variant-field">
+      <span>Variant (valfri)</span>
+      <select data-field="variant"></select>
     </label>
     <label>
       <span>Mängd</span>
@@ -735,9 +873,15 @@ function addRecipeIngredientRow(recipeIngredient = ingredient("", 1, "cl")) {
       <span>Valfri</span>
     </label>
     <button class="danger" type="button" data-action="remove" aria-label="Ta bort ingrediens">Ta bort</button>
+    <button type="button" data-action="new-ingredient">Ny ingrediens…</button>
   `;
 
   populateIngredientTypeSelect(row.querySelector('[data-field="type"]'), recipeIngredient.type);
+  const typeSelect = row.querySelector('[data-field="type"]');
+  const variantSelect = row.querySelector('[data-field="variant"]');
+  populateVariantSelect(variantSelect, typeSelect.value, recipeIngredient.variantId, true);
+  typeSelect.addEventListener("change", () => populateVariantSelect(variantSelect, typeSelect.value, "", true));
+  row.querySelector('[data-action="new-ingredient"]').addEventListener("click", () => openIngredientDefinition(row));
   row.querySelector('[data-field="amount"]').value = recipeIngredient.amount ?? "";
   row.querySelector('[data-field="unit"]').value = normalizeUnit(recipeIngredient.unit || "cl");
   row.querySelector('[data-field="optional"]').checked = Boolean(recipeIngredient.optional);
@@ -761,7 +905,8 @@ function collectRecipeIngredients() {
       row.querySelector('[data-field="type"]').value,
       row.querySelector('[data-field="amount"]').value,
       row.querySelector('[data-field="unit"]').value,
-      row.querySelector('[data-field="optional"]').checked
+      row.querySelector('[data-field="optional"]').checked,
+      row.querySelector('[data-field="variant"]').value
     ))
     .filter((recipeIngredient) => recipeIngredient.type);
 }
@@ -769,8 +914,10 @@ function collectRecipeIngredients() {
 function saveInventoryFromForm(event) {
   event.preventDefault();
   const payload = sanitizeInventory({
+    ...state.data.inventory.find((entry) => entry.id === els.inventoryId.value),
     id: els.inventoryId.value || createId(),
     type: els.inventoryType.value,
+    variantId: els.inventoryVariant.value,
     name: els.inventoryName.value.trim(),
     amount: els.inventoryAmount.value,
     unit: els.inventoryUnit.value,
@@ -778,6 +925,8 @@ function saveInventoryFromForm(event) {
   });
 
   if (!payload.type || !payload.name || !payload.unit) return;
+  try { validateVariants({ inventory: [payload] }, ingredientVariantsStore); }
+  catch { showToast("Välj en variant som hör till produktens typ."); return; }
 
   if (els.inventoryId.value) {
     updateInventory(els.inventoryId.value, payload, "Ingrediens sparad.");
@@ -798,6 +947,7 @@ function saveRecipeFromForm(event) {
   }
 
   const payload = sanitizeRecipe({
+    ...state.data.recipes.find((entry) => entry.id === els.recipeId.value),
     id: els.recipeId.value || createId(),
     name: els.recipeName.value.trim(),
     category: getExistingRecipeCategory(els.recipeId.value),
@@ -807,6 +957,8 @@ function saveRecipeFromForm(event) {
   });
 
   if (!payload.name || !payload.ingredients.length || !payload.instructions) return;
+  try { validateVariants({ recipes: [payload] }, ingredientVariantsStore); }
+  catch { showToast("Välj en variant som hör till ingrediensens typ."); return; }
 
   if (els.recipeId.value) {
     updateRecipe(els.recipeId.value, payload, "Recept sparat.");
@@ -859,6 +1011,7 @@ function editInventory(id) {
   if (!entry) return;
   els.inventoryId.value = entry.id;
   populateIngredientTypeSelect(els.inventoryType, entry.type);
+  populateVariantSelect(els.inventoryVariant, entry.type, entry.variantId);
   els.inventoryName.value = entry.name;
   els.inventoryAmount.value = entry.amount;
   els.inventoryUnit.value = entry.unit;
@@ -899,6 +1052,7 @@ function resetInventoryForm() {
   els.inventoryForm.reset();
   els.inventoryId.value = "";
   populateIngredientTypeSelect(els.inventoryType);
+  populateVariantSelect(els.inventoryVariant, "");
   els.inventoryFormMode.textContent = "Ny ingrediens";
 }
 
@@ -917,8 +1071,16 @@ function resetTypeForm() {
 function refreshTypeControls() {
   const inventoryType = els.inventoryType.value;
   populateIngredientTypeSelect(els.inventoryType, inventoryType);
-  const recipeIngredients = collectRecipeIngredients();
-  setRecipeIngredientRows(recipeIngredients);
+  populateVariantSelect(els.inventoryVariant, inventoryType, els.inventoryVariant.value);
+  populateIngredientTypeSelect(els.newVariantType, els.newVariantType.value);
+  renderVariants();
+  // Refresh only selects: retain unfinished rows, amounts, units and optional flags.
+  els.recipeIngredientRows.querySelectorAll(".ingredient-row").forEach((row) => {
+    const typeSelect = row.querySelector('[data-field="type"]');
+    const variantSelect = row.querySelector('[data-field="variant"]');
+    populateIngredientTypeSelect(typeSelect, typeSelect.value);
+    populateVariantSelect(variantSelect, typeSelect.value, variantSelect.value, true);
+  });
 }
 
 function persistAndRender(message) {
@@ -970,7 +1132,9 @@ function createBackup() {
     settings: {
       panels: readJson(PANEL_KEY, {})
     },
-    ingredientTypes: ingredientTypesStore
+    ingredientTypes: ingredientTypesStore,
+    ingredientVariants: ingredientVariantsStore,
+    schemaVersion: 2
   };
 }
 
@@ -987,7 +1151,7 @@ function showRestoreDialog() {
     "",
     "* Lager",
     "* Recept",
-    "* Typer",
+    "* Typer och ingrediensvarianter",
     "* Inställningar"
   ].join("\n"));
   if (confirmed) applyPendingRestore();
@@ -1010,10 +1174,9 @@ function clearPendingRestore() {
 
 function restoreBackup(imported) {
   ingredientTypesStore = imported.ingredientTypes;
-  persistIngredientTypes();
-
+  ingredientVariantsStore = imported.ingredientVariants;
   state.data = imported.data;
-  persist();
+  persistIngredientTypes();
 
   localStorage.setItem(PANEL_KEY, JSON.stringify(imported.settings.panels || {}));
   restorePanelState();
@@ -1028,17 +1191,39 @@ function restoreBackup(imported) {
 }
 
 function normalizeBackup(data) {
-  const ingredientTypes = Array.isArray(data.ingredientTypes)
+  if (!data || !Array.isArray(data.inventory) || !Array.isArray(data.recipes)) throw new Error("Invalid data");
+  if (data.ingredientVariants !== undefined && !Array.isArray(data.ingredientVariants)) throw new Error("Invalid ingredient variants");
+  let ingredientTypes = Array.isArray(data.ingredientTypes)
     ? normalizeIngredientTypes(data.ingredientTypes)
-    : ingredientTypesStore;
+    : recoverLegacyTypes(data);
   const previousTypes = ingredientTypesStore;
-  ingredientTypesStore = ingredientTypes;
-  const normalizedData = normalizeData(data);
-  ingredientTypesStore = previousTypes;
+  const previousVariants = ingredientVariantsStore;
+  let normalizedData;
+  let ingredientVariants;
+  try {
+    ingredientTypesStore = ingredientTypes;
+    ingredientVariantsStore = Array.isArray(data.ingredientVariants) ? data.ingredientVariants.map((entry) => ({ ...entry })) : [];
+    let source = JSON.parse(JSON.stringify(data));
+    ingredientVariants = ingredientVariantsStore;
+    validateVariants(source, ingredientVariants);
+    const migrated = migrateIngredientStructure(source, ingredientTypes, ingredientVariants);
+    source = migrated.data;
+    ingredientTypes = migrated.types;
+    ingredientTypesStore = ingredientTypes;
+    ingredientVariants = migrated.variants;
+    ingredientVariants = simplifyIngredientVariants(source, ingredientVariants);
+    ingredientVariantsStore = ingredientVariants;
+    validateVariants(source, ingredientVariants);
+    normalizedData = normalizeData(source);
+  } finally {
+    ingredientTypesStore = previousTypes;
+    ingredientVariantsStore = previousVariants;
+  }
 
   return {
     data: normalizedData,
     ingredientTypes,
+    ingredientVariants,
     settings: data.settings && typeof data.settings === "object" ? data.settings : {}
   };
 }
@@ -1093,9 +1278,11 @@ function sanitizeInventory(entry) {
   const type = normalizeIngredientType(entry.type || "Okänd");
   const note = normalizeLabel(entry.note || entry.notes || entry.notering || "");
   return {
+    ...entry,
     id: String(entry.id || createId()),
     category: getIngredientCategory(type),
     type,
+    ...(entry.variantId ? { variantId: String(entry.variantId) } : {}),
     name: String(entry.name || "Namnlös"),
     amount: Number(entry.amount || 0),
     unit: normalizeUnit(entry.unit || "st"),
@@ -1106,10 +1293,11 @@ function sanitizeInventory(entry) {
 
 function sanitizeRecipe(entry) {
   return {
+    ...entry,
     id: String(entry.id || createId()),
     name: String(entry.name || "Namnlöst recept"),
     category: String(entry.category || "Okategoriserat"),
-    ingredients: Array.isArray(entry.ingredients) ? entry.ingredients.map(sanitizeIngredient).filter(isCompleteIngredient) : [],
+    ingredients: Array.isArray(entry.ingredients) ? entry.ingredients.map(sanitizeIngredient) : [],
     instructions: String(entry.instructions || ""),
     sourceUrl: normalizeSourceUrl(entry.sourceUrl || "")
   };
@@ -1117,7 +1305,7 @@ function sanitizeRecipe(entry) {
 
 function sanitizeIngredient(value) {
   if (typeof value === "string") return parseIngredientLine(value);
-  return ingredient(value.type || "", value.amount ?? null, value.unit || "", Boolean(value.optional));
+  return { ...value, ...ingredient(value.type || "", value.amount ?? null, value.unit || "", Boolean(value.optional), value.variantId) };
 }
 
 function isCompleteIngredient(recipeIngredient) {
@@ -1168,7 +1356,7 @@ function populateIngredientTypeSelect(select, selectedType = "") {
   const normalizedSelectedType = normalizeIngredientType(selectedType);
   const options = [
     option("", "Välj typ"),
-    ...ingredientTypesStore.map((entry) => option(entry.type, entry.type))
+    ...ingredientTypesStore.slice().sort((a, b) => sortSv(a.type, b.type)).map((entry) => option(entry.type, entry.type))
   ];
 
   if (normalizedSelectedType && !isKnownIngredientType(normalizedSelectedType)) {
@@ -1184,6 +1372,269 @@ function populateIngredientTypeSelect(select, selectedType = "") {
 function populateCategorySelect(select, selectedCategory = CATEGORY_OPTIONS[0]) {
   select.replaceChildren(...CATEGORY_OPTIONS.map((category) => option(category, category)));
   select.value = CATEGORY_OPTIONS.includes(selectedCategory) ? selectedCategory : "Övrigt";
+}
+
+function migrateIngredientStructure(data, types, variants) {
+  const migrated = migrateFlavoredSpirits(data, types, variants);
+  if (!Array.isArray(migrated.variants)) return migrated;
+  // User-confirmed identity from the existing inventory. Never infer other products.
+  const stockId = "898abb82-c31e-4763-961c-7bdf85055e07";
+  const entry = migrated.data.inventory.find((entry) => entry.id === stockId);
+  if (!entry || normalizeKey(entry.type) !== normalizeKey("Fruktlikör")
+    || !["daiquiri", "bacardi strawberry daiquiri"].includes(normalizeKey(entry.name))
+    // An explicit empty value means the user chose no variant; respect that choice.
+    || Object.prototype.hasOwnProperty.call(entry, "variantId")) return migrated;
+  let variant = migrated.variants.find((variant) => normalizeKey(variant.type) === normalizeKey("Fruktlikör")
+    && normalizeKey(variant.name) === "bacardi strawberry daiquiri");
+  const nextVariants = migrated.variants.slice();
+  if (!variant) {
+    variant = { id: createId(), type: entry.type, name: "Bacardi Strawberry Daiquiri" };
+    nextVariants.push(variant);
+  }
+  return { ...migrated, changed: true, variants: nextVariants,
+    data: { ...migrated.data, inventory: migrated.data.inventory.map((stock) => stock.id === stockId ? { ...stock, variantId: variant.id } : stock) } };
+}
+
+function migrateFlavoredSpirits(data, types, variants) {
+  const groups = [
+    { oldType: "Smaksatt Vodka", type: "Vodka", flavors: [
+      { name: "Rhubarb", product: "Rabarbervodka" }, { name: "Pear", product: "Absolut Pears" }
+    ] },
+    { oldType: "Smaksatt Gin", type: "Gin", flavors: [
+      { name: "Blood Orange", product: "Gibsons Blood Orange Gin" }
+    ] }
+  ];
+  let result = { data, types, variants, changed: false };
+  if (!Array.isArray(variants)) return result;
+  for (const group of groups) {
+    const isOld = (entry) => normalizeKey(typeof entry === "string" ? parseIngredientLine(entry).type : entry.type) === normalizeKey(group.oldType);
+    const flavorFor = (name) => group.flavors.find((flavor) =>
+      [flavor.name, flavor.product].some((label) => normalizeKey(normalizeLabel(label)) === normalizeKey(normalizeLabel(name))));
+    const oldVariants = result.variants.filter(isOld);
+    const recipeLinks = result.data.recipes.flatMap((recipe) => recipe.ingredients || []).filter(isOld);
+    // A generic flavored-spirit requirement cannot safely be broadened to plain spirit.
+    // Conflicting IDs also require an explicit decision; defer the whole legacy type.
+    if (recipeLinks.some((entry) => !entry.variantId
+      || !flavorFor(oldVariants.find((variant) => variant.id === entry.variantId)?.name))) continue;
+    if (oldVariants.some((entry) => {
+      const flavor = flavorFor(entry.name);
+      return flavor && result.variants.some((other) => other.id !== entry.id
+        && ((normalizeKey(other.type) === normalizeKey(group.type) && normalizeKey(other.name) === normalizeKey(flavor.name))
+          || (isOld(other) && flavorFor(other.name) === flavor)));
+    })) continue;
+    let changed = false;
+    let nextVariants = result.variants.map((entry) => {
+      const flavor = isOld(entry) && flavorFor(entry.name);
+      if (!flavor) return entry;
+      changed = true;
+      return { ...entry, type: group.type, name: flavor.name };
+    });
+    const inventory = result.data.inventory.map((entry) => {
+      if (!isOld(entry)) return entry;
+      const existing = entry.variantId && nextVariants.find((variant) => variant.id === entry.variantId);
+      if (entry.variantId && (!existing || normalizeKey(existing.type) !== normalizeKey(group.type))) return entry;
+      const flavor = existing ? flavorFor(existing.name) : flavorFor(entry.name);
+      if (!flavor) return entry; // Unknown products retain their original classification.
+      let variant = existing || nextVariants.find((variant) => normalizeKey(variant.type) === normalizeKey(group.type)
+        && normalizeKey(variant.name) === normalizeKey(flavor.name));
+      if (!variant) {
+        variant = { id: createId(), type: group.type, name: flavor.name };
+        nextVariants = [...nextVariants, variant];
+      }
+      changed = true;
+      return { ...entry, type: group.type, variantId: variant.id };
+    });
+    const recipes = result.data.recipes.map((recipe) => {
+      if (!(recipe.ingredients || []).some(isOld)) return recipe;
+      changed = true;
+      return { ...recipe, ingredients: recipe.ingredients.map((entry) => isOld(entry) ? { ...entry, type: group.type } : entry) };
+    });
+    let nextTypes = result.types;
+    if (changed && !nextTypes.some((entry) => normalizeKey(entry.type) === normalizeKey(group.type))) {
+      nextTypes = [...nextTypes, { ...DEFAULT_INGREDIENT_TYPES.find((entry) => entry.type === group.type) }];
+    }
+    const inUse = inventory.some(isOld) || recipes.some((recipe) => (recipe.ingredients || []).some(isOld)) || nextVariants.some(isOld);
+    if (!inUse && nextTypes.some(isOld)) { nextTypes = nextTypes.filter((entry) => !isOld(entry)); changed = true; }
+    if (changed) result = { data: { ...result.data, inventory, recipes }, types: nextTypes, variants: nextVariants, changed: true };
+  }
+  return result;
+}
+
+function simplifyIngredientVariants(data, variants) {
+  if (!Array.isArray(variants)) return variants;
+  const referencedIds = new Set([
+    ...(data.inventory || []),
+    ...(data.recipes || []).flatMap((entry) => entry.ingredients || [])
+  ].map((entry) => entry.variantId).filter(Boolean));
+  let changed = false;
+  const simplified = variants.filter((entry) => {
+    const redundant = normalizeKey(entry.type) === "cointreau" && normalizeKey(entry.name) === "cointreau";
+    if (redundant && !referencedIds.has(entry.id)) { changed = true; return false; }
+    return true;
+  }).map((entry) => {
+    const oldName = normalizeKey(entry.type) === "tonic" && normalizeKey(entry.name) === "pink grapefruit tonic";
+    // A conflicting definition must not be merged or have its ID replaced.
+    const conflict = variants.some((other) => other.id !== entry.id
+      && normalizeKey(other.type) === "tonic" && normalizeKey(other.name) === "pink grapefruit");
+    if (oldName && !conflict) { changed = true; return { ...entry, name: "Pink Grapefruit" }; }
+    return entry;
+  });
+  return changed ? simplified : variants;
+}
+
+function variantLabel(id) {
+  return ingredientVariantsStore.find((entry) => entry.id === id)?.name || `Okänd variant: ${id}`;
+}
+
+function populateVariantSelect(select, type, selected = "", recipeRequirement = false) {
+  const variants = ingredientVariantsStore.filter((entry) => normalizeKey(entry.type) === normalizeKey(type))
+    .sort((a, b) => sortSv(a.name, b.name));
+  select.required = false;
+  select.replaceChildren(option("", recipeRequirement ? "Ingen variant – generell typ" : "Ingen variant"),
+    ...variants.map((entry) => option(entry.id, entry.name)));
+  if (selected && !variants.some((entry) => entry.id === selected)) select.append(option(selected, variantLabel(selected)));
+  select.value = selected || "";
+}
+
+function renderVariants() {
+  els.variantList.replaceChildren(...ingredientVariantsStore.map((entry) => {
+    const row = el("div", "variant-list-row");
+    const label = el("span");
+    label.textContent = `${entry.type} → ${entry.name}`;
+    const button = el("button");
+    button.type = "button";
+    button.textContent = "Ta bort";
+    button.setAttribute("aria-label", `Ta bort ${entry.type} → ${entry.name}`);
+    button.dataset.variantId = entry.id;
+    button.addEventListener("click", () => deleteIngredientVariant(entry.id));
+    row.append(label, button);
+    return row;
+  }));
+  if (!ingredientVariantsStore.length) els.variantList.textContent = "Inga ingrediensvarianter.";
+}
+
+function deleteIngredientVariant(id) {
+  const variant = ingredientVariantsStore.find((entry) => entry.id === id);
+  if (!variant) return;
+  const inventoryCount = state.data.inventory.filter((entry) => entry.variantId === id).length;
+  const recipeCount = state.data.recipes.filter((entry) => entry.ingredients.some((ingredient) => ingredient.variantId === id)).length;
+  if (inventoryCount || recipeCount) {
+    alert(`Kan inte ta bort ${variant.type} → ${variant.name}. Varianten används i ${inventoryCount} lagerposter och ${recipeCount} recept. Ta bort kopplingarna först.`);
+    return;
+  }
+  if (!confirm(`Ta bort ingrediensvarianten ${variant.type} → ${variant.name}?`)) return;
+  ingredientVariantsStore = ingredientVariantsStore.filter((entry) => entry.id !== id);
+  persist();
+  localStorage.setItem(VARIANT_STORAGE_KEY, JSON.stringify(ingredientVariantsStore));
+  // Unsaved forms may have selected the now deleted definition.
+  if (els.inventoryVariant.value === id) els.inventoryVariant.value = "";
+  els.recipeIngredientRows.querySelectorAll('[data-field="variant"]').forEach((select) => {
+    if (select.value === id) select.value = "";
+  });
+  refreshTypeControls();
+  showToast("Ingrediensvarianten är borttagen.");
+}
+
+function saveVariantFromForm(event) {
+  event.preventDefault();
+  const type = els.newVariantType.value;
+  const name = normalizeLabel(els.newVariantName.value);
+  if (!isKnownIngredientType(type) || !name) return;
+  if (ingredientVariantsStore.some((entry) => normalizeKey(entry.type) === normalizeKey(type) && normalizeKey(entry.name) === normalizeKey(name))) {
+    showToast("Varianten finns redan för denna typ.");
+    return;
+  }
+  ingredientVariantsStore.push({ id: createId(), type, name });
+  persist();
+  refreshTypeControls();
+  els.newVariantName.value = "";
+  showToast("Variant tillagd. Välj den på lagerposten eller i receptet.");
+}
+
+function recoverLegacyTypes(data) {
+  const types = normalizeIngredientTypes([...ingredientTypesStore, ...DEFAULT_INGREDIENT_TYPES]);
+  const ingredients = [...data.inventory, ...data.recipes.flatMap((entry) => entry.ingredients || [])];
+  ingredients.forEach((entry) => {
+    const type = normalizeLabel(typeof entry === "string" ? parseIngredientLine(entry).type : entry.type);
+    if (type && !types.some((definition) => normalizeKey(definition.type) === normalizeKey(type))) {
+      types.push({ id: createTypeId(type), type, category: CATEGORY_OPTIONS.includes(entry.category) ? entry.category : "Övrigt" });
+    }
+  });
+  return normalizeIngredientTypes(types);
+}
+
+function openIngredientDefinition(row) {
+  const inventory = row === els.inventoryForm;
+  if (inventory && !isKnownIngredientType(els.inventoryType.value)) {
+    showToast("Välj typ innan du skapar en variant.");
+    els.inventoryType.focus();
+    return;
+  }
+  newIngredientTarget = row;
+  els.ingredientDefinitionForm.reset();
+  populateIngredientTypeSelect(els.definitionType, inventory ? els.inventoryType.value : row.querySelector('[data-field="type"]').value);
+  els.definitionType.disabled = inventory;
+  if (!inventory) els.definitionType.append(option("__new__", "Ny typ…"));
+  populateCategorySelect(els.definitionCategory);
+  updateIngredientDefinitionMode();
+  els.ingredientDialog.showModal();
+}
+
+function updateIngredientDefinitionMode() {
+  const newType = els.definitionType.value === "__new__";
+  els.definitionNewTypeFields.hidden = !newType;
+  els.definitionTypeName.disabled = !newType;
+  els.definitionCategory.disabled = !newType;
+  els.definitionVariantName.required = false;
+}
+
+function closeIngredientDefinition() {
+  els.ingredientDialog.close();
+  newIngredientTarget = null;
+}
+
+function saveIngredientDefinition(event) {
+  event.preventDefault();
+  const row = newIngredientTarget;
+  if (!row || !row.isConnected) { closeIngredientDefinition(); return; }
+  const newType = els.definitionType.value === "__new__";
+  const type = normalizeIngredientType(newType ? els.definitionTypeName.value : els.definitionType.value);
+  const name = normalizeLabel(els.definitionVariantName.value);
+  const category = els.definitionCategory.value;
+  if (!type || (!newType && !isKnownIngredientType(type)) || (newType && !CATEGORY_OPTIONS.includes(category))) return;
+  if (!isKnownIngredientType(type)) {
+    ingredientTypesStore = normalizeIngredientTypes([...ingredientTypesStore, { id: createTypeId(type), type, category }]);
+  }
+  let variant = name ? ingredientVariantsStore.find((entry) => normalizeKey(entry.type) === normalizeKey(type)
+    && normalizeKey(entry.name) === normalizeKey(name)) : null;
+  if (name && !variant) {
+    variant = { id: createId(), type, name };
+    ingredientVariantsStore.push(variant);
+  }
+  persistIngredientTypes();
+  refreshTypeControls();
+  const inventory = row === els.inventoryForm;
+  populateIngredientTypeSelect(inventory ? els.inventoryType : row.querySelector('[data-field="type"]'), type);
+  populateVariantSelect(inventory ? els.inventoryVariant : row.querySelector('[data-field="variant"]'), type, variant?.id, !inventory);
+  render();
+  closeIngredientDefinition();
+  showToast(inventory ? (variant ? "Varianten är vald för produkten." : "Produkten använder enbart ingredienstypen.") : "Ingrediensen är vald i receptet.");
+}
+
+function validateVariants(data, variants) {
+  const ids = new Set();
+  const names = new Set();
+  variants.forEach((entry) => {
+    const key = `${normalizeKey(entry.type)}:${normalizeKey(normalizeLabel(entry.name))}`;
+    if (!entry.id || !normalizeLabel(entry.name) || !isKnownIngredientType(entry.type) || ids.has(entry.id) || names.has(key)) throw new Error("Invalid ingredient variants");
+    ids.add(entry.id);
+    names.add(key);
+  });
+  [...(data.inventory || []), ...(data.recipes || []).flatMap((entry) => entry.ingredients || [])].forEach((entry) => {
+    if (!entry.variantId) return;
+    const variant = variants.find((candidate) => candidate.id === entry.variantId);
+    if (!variant || normalizeKey(variant.type) !== normalizeKey(entry.type)) throw new Error("Invalid variant reference");
+  });
 }
 
 function isKnownIngredientType(type) {
@@ -1307,7 +1758,7 @@ function formatAmount(value) {
 function formatIngredient(recipeIngredient) {
   const amount = recipeIngredient.amount ? ` ${formatAmount(recipeIngredient.amount)} ${recipeIngredient.unit}` : "";
   const optional = recipeIngredient.optional ? " (valfri)" : "";
-  return `${formatTypeLabel(recipeIngredient.type)}${amount}${optional}`;
+  return `${formatTypeLabel(recipeIngredient.type)}${recipeIngredient.variantId ? ` · ${variantLabel(recipeIngredient.variantId)}` : ""}${amount}${optional}`;
 }
 
 function showToast(message) {

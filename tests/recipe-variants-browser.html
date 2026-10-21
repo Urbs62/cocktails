@@ -1,0 +1,106 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Isolated recipe variant tests</title>
+<pre id="result">RUNNING</pre>
+<iframe id="app" title="Recipe variant test" style="width:100%;height:1000px"></iframe>
+<script>
+(async()=>{
+  const result=document.getElementById('result');
+  const frame=document.getElementById('app');
+  const assert=(value,message)=>{if(!value)throw new Error(message);};
+  const types=[
+    {id:'vodka',type:'Vodka',category:'Sprit'},
+    {id:'o',type:'Ö-test',category:'Övrigt'},
+    {id:'a',type:'Ä-test',category:'Övrigt'},
+    {id:'frukt',type:'Fruktlikör',category:'Likör'},
+    {id:'aa',type:'Å-test',category:'Övrigt'},
+    {id:'gin',type:'Gin',category:'Sprit'},
+    {id:'bourbon',type:'Bourbon',category:'Sprit'},
+    {id:'z',type:'Z-test',category:'Övrigt'}
+  ];
+  const variants=[
+    {id:'o-flavor',type:'Fruktlikör',name:'Ö-test'},
+    {id:'a-flavor',type:'Fruktlikör',name:'Ä-test'},
+    {id:'aa-flavor',type:'Fruktlikör',name:'Å-test'},
+    {id:'z-flavor',type:'Fruktlikör',name:'Z-test'},
+    {id:'bacardi-id',type:'Fruktlikör',name:'Bacardi Strawberry Daiquiri'},
+    {id:'passion-id',type:'Fruktlikör',name:'Passion'},
+    {id:'rhubarb-id',type:'Vodka',name:'Rhubarb'},
+    {id:'pear-id',type:'Vodka',name:'Pear'}
+  ];
+  const fixture={ingredientTypes:types,ingredientVariants:variants,inventory:[
+    {id:'898abb82-c31e-4763-961c-7bdf85055e07',type:'Fruktlikör',category:'Likör',name:'Daiquiri',amount:25,unit:'cl',location:'Hemma'},
+    {id:'rhubarb-stock',type:'Vodka',category:'Sprit',name:'Rabarbervodka',amount:20,unit:'cl',location:'Hemma',variantId:'rhubarb-id'},
+    {id:'plain-vodka',type:'Vodka',category:'Sprit',name:'Absolut Vodka',amount:70,unit:'cl',location:'Hemma'},
+    {id:'other-fruit',type:'Fruktlikör',category:'Likör',name:'Other',amount:50,unit:'cl',location:'Hemma'}
+  ],recipes:[{id:'existing',name:'Existing recipe',category:'Recept',ingredients:[{type:'Vodka',amount:5,unit:'cl',optional:false}],instructions:'Keep',sourceUrl:''}]};
+  try{
+    localStorage.clear();
+    localStorage.setItem('cocktails:data:v1',JSON.stringify(fixture));
+    await new Promise(resolve=>{frame.onload=resolve;frame.src='../index.html';});
+    let w=frame.contentWindow,d=frame.contentDocument;
+    const get=id=>d.getElementById(id);
+    const evaluate=code=>w.eval(code);
+    const rows=()=>[...d.querySelectorAll('.ingredient-row')];
+    const field=name=>rows()[0].querySelector(`[data-field="${name}"]`);
+    const change=(node,value)=>{node.value=value;node.dispatchEvent(new w.Event('change',{bubbles:true}));};
+    const labels=select=>[...select.options].slice(1).map(option=>option.textContent);
+    const equal=(a,b,message)=>assert(JSON.stringify(a)===JSON.stringify(b),message+': '+JSON.stringify(a));
+    const originalStock=evaluate('JSON.stringify(state.data.inventory)');
+    const originalRecipe=evaluate('JSON.stringify(state.data.recipes[0])');
+    const originalTypes=evaluate('JSON.stringify(ingredientTypesStore)');
+    const originalVariants=evaluate('JSON.stringify(ingredientVariantsStore)');
+    assert(evaluate('state.data.inventory[0].variantId')==='bacardi-id','Confirmed Daiquiri migration did not reuse registered variant');
+    assert(evaluate('state.data.inventory[0].name')==='Daiquiri','Migration changed product name');
+    assert(evaluate('getRecipeStatus(state.data.recipes[0]).canMake'),'Existing generic recipe failed');
+    get('recipeForm').closest('details').open=true;
+    equal(labels(field('type')),['Bourbon','Fruktlikör','Gin','Vodka','Z-test','Å-test','Ä-test','Ö-test'],'Swedish type order incorrect');
+    change(field('type'),'Fruktlikör');
+    equal(labels(field('variant')),['Bacardi Strawberry Daiquiri','Passion','Z-test','Å-test','Ä-test','Ö-test'],'Swedish variant order incorrect');
+    assert([...field('variant').options].some(option=>option.value==='passion-id'),'Variant without stock missing');
+    change(field('variant'),'bacardi-id');
+    field('amount').value='5';
+    get('recipeName').value='Bacardi recipe';
+    get('recipeInstructions').value='Build';
+    get('recipeForm').requestSubmit();
+    const recipeId=evaluate('state.data.recipes[1].id');
+    assert(evaluate('state.data.recipes[1].ingredients[0].variantId')==='bacardi-id','Create lost variant ID');
+    assert(evaluate('getRecipeStatus(state.data.recipes[1]).canMake'),'Bacardi stock failed to match');
+    evaluate(`editRecipe(${JSON.stringify(recipeId)})`);
+    assert(field('variant').value==='bacardi-id','Edit lost selected variant');
+    change(field('variant'),'passion-id');
+    get('recipeForm').requestSubmit();
+    assert(!evaluate('getRecipeStatus(state.data.recipes[1]).canMake'),'Other fruit products fulfilled specific Passion requirement');
+    evaluate(`editRecipe(${JSON.stringify(recipeId)})`);
+    change(field('variant'),'bacardi-id');
+    get('recipeForm').requestSubmit();
+    assert(evaluate('state.data.recipes[1].id')===recipeId,'Editing changed recipe ID');
+    change(field('type'),'Vodka');
+    equal(labels(field('variant')),['Pear','Rhubarb'],'Vodka variant order incorrect');
+    change(field('variant'),'rhubarb-id');
+    field('amount').value='5';
+    get('recipeName').value='Rhubarb recipe';
+    get('recipeInstructions').value='Build';
+    get('recipeForm').requestSubmit();
+    assert(evaluate('getRecipeStatus(state.data.recipes[2]).canMake'),'Rabarbervodka did not match Rhubarb');
+    evaluate('globalThis.allStock=state.data.inventory;state.data.inventory=state.data.inventory.filter(entry=>entry.id!=="rhubarb-stock")');
+    assert(!evaluate('getRecipeStatus(state.data.recipes[2]).canMake'),'Plain Vodka matched Rhubarb');
+    evaluate('state.data.inventory=allStock.filter(entry=>entry.id!=="898abb82-c31e-4763-961c-7bdf85055e07")');
+    assert(!evaluate('getRecipeStatus(state.data.recipes[1]).canMake'),'Generic fruit liqueur matched Bacardi variant');
+    evaluate('state.data.inventory=allStock');
+    assert(evaluate('JSON.stringify(state.data.inventory)')===originalStock,'Recipe operations changed inventory');
+    assert(evaluate('JSON.stringify(state.data.recipes[0])')===originalRecipe,'Existing recipe changed');
+    assert(evaluate('JSON.stringify(ingredientTypesStore)')===originalTypes,'Sorting mutated type registry');
+    assert(evaluate('JSON.stringify(ingredientVariantsStore)')===originalVariants,'Sorting mutated variant registry');
+    const backup=evaluate('JSON.stringify(createBackup())');
+    evaluate('restoreBackup(normalizeBackup(JSON.parse(JSON.stringify(createBackup()))))');
+    assert(evaluate('JSON.stringify(createBackup())')===backup,'JSON import/export changed IDs or data');
+    await new Promise(resolve=>{frame.onload=resolve;frame.contentWindow.location.reload();});
+    w=frame.contentWindow;d=frame.contentDocument;
+    assert(evaluate('state.data.recipes[1].ingredients[0].variantId')==='bacardi-id','Reload lost Bacardi link');
+    assert(evaluate('state.data.recipes[2].ingredients[0].variantId')==='rhubarb-id','Reload lost Rhubarb link');
+    assert(evaluate('state.data.recipes.every(recipe=>getRecipeStatus(recipe).canMake)'),'Reload lost recipe availability');
+    result.textContent='PASS: shared variant registry, Bacardi and Rhubarb create/edit/matching, variants without stock, Swedish A–Ö order, unchanged existing records, JSON import/export and reload';
+  }catch(error){result.textContent='FAIL: '+error.stack;}
+})();
+</script>

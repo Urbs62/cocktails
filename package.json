@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "node dev-server.cjs"
+    "dev": "node dev-server.cjs",
+    "test": "node tests/ingredients.cjs && node tests/flavored-spirits.cjs && node tests/recipe-variants.cjs && node tests/shopping.cjs"
   }
 }

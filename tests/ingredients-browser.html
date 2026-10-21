@@ -1,0 +1,254 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Isolated Cocktails ingredient tests</title>
+<pre id="result">RUNNING</pre>
+<iframe id="app" title="Cocktails test" style="width:100%;height:900px"></iframe>
+<script>
+// Run only in a disposable browser profile: this fixture replaces test-origin storage.
+(async () => {
+  const result = document.getElementById('result');
+  const frame = document.getElementById('app');
+  const assert = (condition, message) => { if (!condition) throw new Error(message); };
+  const fixture = {
+    inventory: [{id:'existing-rhubarb',category:'Sprit',type:'Vodka',name:'Rhubarb Vodka',amount:70,unit:'cl',location:'Hemma',note:'Keep this note'}],
+    recipes: []
+  };
+  try {
+    localStorage.clear();
+    const flavoredFixture = {
+      inventory:[
+        {id:'r',type:'Smaksatt Vodka',category:'Sprit',name:'Rabarbervodka',amount:10,unit:'cl',location:'Hemma'},
+        {id:'p',type:'Smaksatt Vodka',category:'Sprit',name:'Absolut Pears',amount:80,unit:'cl',location:'Stugan'},
+        {id:'b',type:'Smaksatt Gin',category:'Sprit',name:'Gibsons Blood Orange Gin',amount:15,unit:'cl',location:'Hemma'}
+      ], recipes:[],ingredientVariants:[]
+    };
+    localStorage.setItem('cocktails:data:v1', JSON.stringify(flavoredFixture));
+    await new Promise(resolve => { frame.onload = resolve; frame.src = '../index.html'; });
+    const flavored = JSON.parse(localStorage.getItem('cocktails:data:v1'));
+    assert(flavored.ingredientVariants.length === 3, 'Flavored migration did not create required definitions');
+    assert(flavored.inventory[0].type === 'Vodka' && flavored.inventory[1].type === 'Vodka' && flavored.inventory[2].type === 'Gin', 'Flavored products not migrated');
+    assert(frame.contentWindow.eval('hasIngredient(ingredient("Vodka",5,"cl"),"Hemma") && hasIngredient(ingredient("Vodka",5,"cl"),"Stugan") && hasIngredient(ingredient("Gin",5,"cl"),"Hemma")'), 'Flexible matching failed after migration');
+    const flavoredBackup = frame.contentWindow.eval('JSON.stringify(createBackup())');
+    frame.contentWindow.eval('restoreBackup(normalizeBackup(JSON.parse(JSON.stringify(createBackup()))))');
+    await new Promise(resolve => { frame.onload = resolve; frame.contentWindow.location.reload(); });
+    assert(frame.contentWindow.eval('JSON.stringify(createBackup())') === flavoredBackup, 'Flavored IDs or links changed after JSON restore/reload');
+    const migrationFixture = {
+      inventory:[{id:'pink-stock',type:'Tonic',category:'Mixer',variantId:'pink-original-id',name:'Pink Grapefruit',amount:33,unit:'cl',location:'Hemma'}],
+      recipes:[{id:'pink-recipe',name:'Pink recipe',category:'Recept',ingredients:[{type:'Tonic',variantId:'pink-original-id',amount:10,unit:'cl',optional:false}],instructions:'Keep',sourceUrl:''}],
+      ingredientVariants:[{id:'pink-original-id',type:'Tonic',name:'Pink Grapefruit Tonic'},{id:'unused-cointreau',type:'Cointreau',name:'Cointreau'}]
+    };
+    localStorage.setItem('cocktails:data:v1', JSON.stringify(migrationFixture));
+    await new Promise(resolve => { frame.onload = resolve; frame.src = '../index.html'; });
+    const migrated = JSON.parse(localStorage.getItem('cocktails:data:v1'));
+    assert(migrated.ingredientVariants.length === 1 && migrated.ingredientVariants[0].id === 'pink-original-id' && migrated.ingredientVariants[0].name === 'Pink Grapefruit', 'Startup simplification failed');
+    assert(JSON.stringify(migrated.inventory) === JSON.stringify(migrationFixture.inventory) && JSON.stringify(migrated.recipes) === JSON.stringify(migrationFixture.recipes), 'Migration changed inventory or recipes');
+    assert(frame.contentDocument.getElementById('inventoryList').textContent.includes('Pink Grapefruit'), 'Migrated product not rendered');
+    assert(frame.contentWindow.eval('getRecipeStatus(state.data.recipes[0]).canMake'), 'Migrated variant no longer matches');
+    frame.contentWindow.eval('restoreBackup(normalizeBackup(JSON.parse(JSON.stringify(createBackup()))))');
+    await new Promise(resolve => { frame.onload = resolve; frame.contentWindow.location.reload(); });
+    assert(frame.contentWindow.eval('ingredientVariantsStore.length === 1 && ingredientVariantsStore[0].id === "pink-original-id" && getRecipeStatus(state.data.recipes[0]).canMake'), 'Restore/reload lost migrated variant');
+    localStorage.setItem('cocktails:data:v1', JSON.stringify(fixture));
+    localStorage.removeItem('cocktails:ingredientVariants:v1');
+    await new Promise(resolve => { frame.onload = resolve; frame.contentWindow.location.reload(); });
+    const w = frame.contentWindow;
+    const d = frame.contentDocument;
+    const evaluate = code => w.eval(code);
+    const change = (element, value) => { element.value = value; element.dispatchEvent(new w.Event('change', {bubbles:true})); };
+    const get = id => d.getElementById(id);
+    get('recipeForm').closest('details').open = true;
+    get('recipeName').value = 'Rhubarb & Elderflower Tonic';
+    get('recipeInstructions').value = 'Bygg i glas över is.';
+    get('recipeSourceUrl').value = 'https://example.com/recipe';
+    const rows = () => [...d.querySelectorAll('.ingredient-row')];
+    const field = (row, name) => row.querySelector(`[data-field="${name}"]`);
+    change(field(rows()[0], 'type'), 'Vodka');
+    field(rows()[0], 'amount').value = '5';
+    get('addRecipeIngredient').click();
+    field(rows()[1], 'amount').value = '12'; // Keep this unfinished row while adding a definition.
+    rows()[0].querySelector('[data-action="new-ingredient"]').click();
+    assert(get('ingredientDialog').open, 'Definition dialog did not open');
+    assert(get('definitionNewTypeFields').hidden, 'New-type fields visible in variant mode');
+    get('definitionVariantName').value = 'Rhubarb Vodka';
+    get('ingredientDefinitionForm').requestSubmit();
+    assert(!get('ingredientDialog').open, 'Definition dialog did not close');
+    assert(rows().length === 2 && field(rows()[1], 'amount').value === '12', 'Unfinished row lost');
+    assert(field(rows()[0], 'variant').selectedOptions[0].textContent === 'Rhubarb Vodka', 'New variant not selected');
+    change(field(rows()[1], 'type'), 'Tonic');
+    rows()[1].querySelector('[data-action="new-ingredient"]').click();
+    get('definitionVariantName').value = 'Elderflower Tonic';
+    get('ingredientDefinitionForm').requestSubmit();
+    get('addRecipeIngredient').click();
+    change(field(rows()[2], 'type'), 'Citronjuice');
+    field(rows()[2], 'amount').value = '2';
+    get('addRecipeIngredient').click();
+    field(rows()[3], 'amount').value = '3';
+    rows()[3].querySelector('[data-action="new-ingredient"]').click();
+    change(get('definitionType'), '__new__');
+    get('definitionTypeName').value = 'Testjuice';
+    change(get('definitionCategory'), 'Juice & Syrup');
+    get('ingredientDefinitionForm').requestSubmit();
+    assert(field(rows()[3], 'type').value === 'Testjuice', 'New type not selected');
+    assert(field(rows()[3], 'amount').value === '3', 'New type lost amount');
+    // A duplicate variant selects the existing ID and leaves the recipe intact.
+    const variantId = field(rows()[0], 'variant').value;
+    rows()[0].querySelector('[data-action="new-ingredient"]').click();
+    get('definitionVariantName').value = '  RHUBARB VODKA  ';
+    get('ingredientDefinitionForm').requestSubmit();
+    assert(field(rows()[0], 'variant').value === variantId, 'Duplicate created a different variant');
+    assert(evaluate('ingredientVariantsStore.length') === 2, 'Duplicate variant created');
+    rows()[3].querySelector('[data-action="remove"]').click();
+    assert(get('recipeName').value === 'Rhubarb & Elderflower Tonic', 'Recipe name lost');
+    assert(get('recipeInstructions').value === 'Bygg i glas över is.', 'Instructions lost');
+    assert(get('recipeSourceUrl').value === 'https://example.com/recipe', 'Source lost');
+    get('recipeForm').requestSubmit();
+    assert(evaluate('state.data.recipes.length') === 1, 'Recipe did not save without stock');
+    assert(!evaluate('getRecipeStatus(state.data.recipes[0]).canMake'), 'Missing stock incorrectly matched');
+    assert(evaluate('state.data.inventory[0].variantId') === undefined, 'Product was linked automatically');
+    evaluate('editInventory("existing-rhubarb")');
+    change(get('inventoryVariant'), variantId);
+    get('inventoryForm').requestSubmit();
+    const linked = evaluate('JSON.stringify(state.data.inventory[0])');
+    assert(JSON.parse(linked).variantId === variantId, 'Explicit inventory link not saved');
+    const {variantId: ignored, ...unchanged} = JSON.parse(linked);
+    assert(JSON.stringify(unchanged) === JSON.stringify(fixture.inventory[0]), 'Existing product data changed');
+    assert(!evaluate('getRecipeStatus(state.data.recipes[0]).canMake'), 'Missing tonic/juice incorrectly matched');
+    evaluate(`state.data.inventory.push({...item('Tonic','Flädertonic',20,'cl','Hemma'),variantId:ingredientVariantsStore.find(v=>v.name==='Elderflower Tonic').id},item('Citronjuice','Citronjuice',10,'cl','Hemma'));persistAndRender();`);
+    assert(evaluate('getRecipeStatus(state.data.recipes[0]).canMake'), 'Complete recipe failed to match');
+    assert(get('recipeList').textContent.includes('Rhubarb Vodka'), 'Matched product not displayed');
+    // Create a shared variant directly from a new inventory draft.
+    get('inventoryForm').closest('details').open = true;
+    change(get('inventoryType'), 'Tonic');
+    get('inventoryName').value = 'Schweppes Pink Grapefruit Tonic';
+    get('inventoryAmount').value = '50';
+    get('inventoryUnit').value = 'cl';
+    get('inventoryLocation').value = 'Hemma';
+    get('newInventoryVariant').click();
+    assert(get('definitionType').value === 'Tonic' && get('definitionType').disabled, 'Inventory variant type not locked to Tonic');
+    get('definitionVariantName').value = 'Pink Grapefruit';
+    get('ingredientDefinitionForm').requestSubmit();
+    const pinkId = get('inventoryVariant').value;
+    assert(pinkId && get('inventoryVariant').selectedOptions[0].textContent === 'Pink Grapefruit', 'New inventory variant not selected');
+    assert(get('inventoryName').value === 'Schweppes Pink Grapefruit Tonic' && get('inventoryAmount').value === '50', 'Inventory draft lost');
+    assert(field(rows()[0], 'variant').value === '', 'Unfinished recipe unexpectedly changed');
+    change(field(rows()[0], 'type'), 'Tonic');
+    assert([...field(rows()[0], 'variant').options].some(option => option.value === pinkId), 'Variant not immediately available in recipes');
+    get('inventoryForm').requestSubmit();
+    const pink = JSON.parse(evaluate('JSON.stringify(state.data.inventory.find(entry => entry.name === "Schweppes Pink Grapefruit Tonic"))'));
+    assert(pink.variantId === pinkId && pink.category === 'Mixer' && pink.amount === 50, 'New product not saved correctly');
+    evaluate(`editInventory(${JSON.stringify(pink.id)})`);
+    assert(get('inventoryVariant').value === pinkId, 'Editing lost selected variant');
+    get('newInventoryVariant').click();
+    get('definitionVariantName').value = '  PINK GRAPEFRUIT  ';
+    get('ingredientDefinitionForm').requestSubmit();
+    assert(get('inventoryVariant').value === pinkId && evaluate('ingredientVariantsStore.length') === 3, 'Duplicate variant ID not reused');
+    get('inventoryAmount').value = '45';
+    get('inventoryForm').requestSubmit();
+    assert(evaluate(`state.data.inventory.find(entry => entry.id === ${JSON.stringify(pink.id)}).amount`) === 45, 'Edit did not save');
+    evaluate(`globalThis.pinkRequirement = ingredient('Tonic', 10, 'cl', false, ${JSON.stringify(pinkId)})`);
+    assert(evaluate('hasIngredient(pinkRequirement, "Hemma")'), 'Specific tonic failed to match');
+    evaluate(`editInventory(${JSON.stringify(pink.id)})`);
+    change(get('inventoryVariant'), '');
+    get('inventoryForm').requestSubmit();
+    assert(!evaluate('hasIngredient(pinkRequirement, "Hemma")'), 'Plain tonic matched specific variant');
+    assert(evaluate('hasIngredient(ingredient("Tonic",10,"cl"), "Hemma")'), 'Generic stock stopped working');
+    evaluate(`editInventory(${JSON.stringify(pink.id)})`);
+    change(get('inventoryType'), 'Vodka');
+    assert(get('inventoryVariant').value === '' && ![...get('inventoryVariant').options].some(option => option.value === pinkId), 'Type change retained incompatible variant');
+    change(get('inventoryType'), 'Tonic');
+    change(get('inventoryVariant'), pinkId);
+    get('inventoryForm').requestSubmit();
+    // Creating a variant while editing must preserve the inventory ID and metadata.
+    evaluate('editInventory("existing-rhubarb")');
+    get('newInventoryVariant').click();
+    get('definitionVariantName').value = 'Test Vodka';
+    get('ingredientDefinitionForm').requestSubmit();
+    const editedVariant = get('inventoryVariant').value;
+    get('inventoryForm').requestSubmit();
+    assert(evaluate('state.data.inventory[0].id') === 'existing-rhubarb' && evaluate('state.data.inventory[0].note') === 'Keep this note', 'Editing variant changed existing metadata');
+    assert(evaluate('state.data.inventory[0].variantId') === editedVariant, 'New variant on existing product not saved');
+    evaluate('editInventory("existing-rhubarb")');
+    change(get('inventoryVariant'), variantId);
+    get('inventoryForm').requestSubmit();
+    // Cointreau needs no variant, either in stock or in a recipe.
+    change(get('inventoryType'), 'Cointreau');
+    assert(!get('inventoryVariant').required && get('inventoryVariant').selectedOptions[0].textContent === 'Ingen variant', 'Missing optional inventory choice');
+    get('inventoryName').value = 'Cointreau';
+    get('inventoryAmount').value = '70';
+    get('inventoryUnit').value = 'cl';
+    get('inventoryForm').requestSubmit();
+    const cointreau = JSON.parse(evaluate('JSON.stringify(state.data.inventory.find(entry => entry.name === "Cointreau"))'));
+    assert(cointreau && !cointreau.variantId && cointreau.type === 'Cointreau', 'Cointreau without variant did not save');
+    evaluate(`editInventory(${JSON.stringify(cointreau.id)})`);
+    get('newInventoryVariant').click();
+    assert(!get('definitionVariantName').required, 'Dialog requires variant for existing type');
+    get('ingredientDefinitionForm').requestSubmit();
+    assert(!get('ingredientDialog').open && get('inventoryVariant').value === '', 'Blank dialog variant not accepted');
+    get('inventoryAmount').value = '65';
+    get('inventoryForm').requestSubmit();
+    assert(evaluate(`state.data.inventory.find(entry => entry.id === ${JSON.stringify(cointreau.id)}).amount`) === 65, 'Cointreau edit failed');
+    get('recipeName').value = 'Cointreau & Pink Grapefruit';
+    get('recipeInstructions').value = 'Bygg med is.';
+    change(field(rows()[0], 'type'), 'Cointreau');
+    rows()[0].querySelector('[data-action="new-ingredient"]').click();
+    get('ingredientDefinitionForm').requestSubmit();
+    assert(!get('ingredientDialog').open && field(rows()[0], 'variant').value === '', 'Recipe dialog requires a variant');
+    assert(!field(rows()[0], 'variant').required, 'Recipe variant select required');
+    field(rows()[0], 'amount').value = '5';
+    field(rows()[0], 'unit').value = 'cl';
+    get('addRecipeIngredient').click();
+    change(field(rows()[1], 'type'), 'Tonic');
+    change(field(rows()[1], 'variant'), pinkId);
+    field(rows()[1], 'amount').value = '10';
+    field(rows()[1], 'unit').value = 'cl';
+    get('recipeForm').requestSubmit();
+    assert(evaluate('state.data.recipes.length') === 2, 'Recipe without Cointreau variant failed to save');
+    assert(evaluate('!state.data.recipes[1].ingredients[0].variantId && state.data.recipes[1].ingredients[0].type === "Cointreau"'), 'Recipe unexpectedly assigned a variant');
+    assert(evaluate('getRecipeStatus(state.data.recipes[1]).canMake'), 'Cointreau generic + Pink Grapefruit specific did not match');
+    assert(evaluate('ingredientVariantsStore.length') === 4, 'Blank variant created a definition');
+    const deletionDataBefore = evaluate('JSON.stringify({data:state.data,types:ingredientTypesStore})');
+    change(get('newVariantType'), 'Cointreau');
+    get('newVariantName').value = 'Cointreau';
+    get('variantForm').requestSubmit();
+    const unusedId = evaluate('ingredientVariantsStore.find(v => v.type === "Cointreau" && v.name === "Cointreau").id');
+    const deleteButton = id => [...get('variantList').querySelectorAll('button')].find(button => button.dataset.variantId === id);
+    assert(get('variantList').closest('details').dataset.panelId === 'structure', 'Deletion buttons outside Structure');
+    const alerts = [];
+    const confirmations = [];
+    w.alert = message => alerts.push(message);
+    w.confirm = message => { confirmations.push(message); return false; };
+    deleteButton(pinkId).click();
+    assert(alerts.length === 1 && alerts[0].includes('lagerposter') && alerts[0].includes('recept'), 'Used variant deletion not clearly blocked');
+    assert(confirmations.length === 0 && deleteButton(pinkId), 'Used variant reached confirmation or disappeared');
+    deleteButton(unusedId).click();
+    assert(confirmations.length === 1 && deleteButton(unusedId), 'Cancel removed unused variant');
+    change(get('inventoryType'), 'Cointreau');
+    change(get('inventoryVariant'), unusedId);
+    change(field(rows()[0], 'type'), 'Cointreau');
+    change(field(rows()[0], 'variant'), unusedId);
+    w.confirm = message => { confirmations.push(message); return true; };
+    deleteButton(unusedId).click();
+    assert(!deleteButton(unusedId), 'Deleted variant still rendered');
+    assert(get('inventoryVariant').value === '' && field(rows()[0], 'variant').value === '', 'Deleted variant remains selected in drafts');
+    assert(![...get('inventoryVariant').options].some(option => option.value === unusedId), 'Deleted variant remains in select');
+    assert(evaluate('JSON.stringify({data:state.data,types:ingredientTypesStore})') === deletionDataBefore, 'Variant deletion changed other data');
+    assert(!JSON.parse(localStorage.getItem('cocktails:data:v1')).ingredientVariants.some(v => v.id === unusedId), 'Deleted variant persisted in snapshot');
+    assert(!JSON.parse(localStorage.getItem('cocktails:ingredientVariants:v1')).some(v => v.id === unusedId), 'Deleted variant persisted in legacy storage');
+    const original = evaluate('JSON.stringify(createBackup())');
+    evaluate('restoreBackup(normalizeBackup(createBackup()))');
+    const restored = evaluate('JSON.stringify(createBackup())');
+    assert(restored === original, 'Backup restore changed data\nBEFORE: ' + original + '\nAFTER: ' + restored);
+    evaluate('updateInventory("existing-rhubarb", {variantId:""})');
+    assert(!evaluate('getRecipeStatus(state.data.recipes[0]).canMake'), 'Generic vodka fulfilled specific variant');
+    assert(evaluate('hasIngredient(ingredient("Vodka",5,"cl"),"Hemma")'), 'Generic vodka failed');
+    evaluate(`updateInventory('existing-rhubarb',{variantId:${JSON.stringify(variantId)}})`);
+    await new Promise(resolve => { frame.onload = resolve; frame.contentWindow.location.reload(); });
+    assert(frame.contentWindow.eval('getRecipeStatus(state.data.recipes[0]).canMake'), 'Reload lost matching');
+    assert(frame.contentWindow.eval('ingredientVariantsStore.length') === 4, 'Reload lost variants');
+    assert(frame.contentWindow.eval('getRecipeStatus(state.data.recipes[1]).canMake'), 'Reload lost generic Cointreau or specific tonic matching');
+    assert(frame.contentWindow.eval('hasIngredient(pinkRequirement = ingredient("Tonic",10,"cl",false,' + JSON.stringify(pinkId) + '),"Hemma")'), 'Reload lost inventory variant link');
+    result.textContent = 'PASS: flavored Vodka/Gin migration, browser forms, optional variants, matching, Structure deletion, confirmation/cancel, usage guard, unchanged data, backup/restore and reload';
+  } catch (error) {
+    result.textContent = 'FAIL: ' + error.stack;
+  }
+})();
+</script>

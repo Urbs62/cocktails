@@ -1,0 +1,113 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Isolated Cocktails inventory UI tests</title>
+<pre id="result">RUNNING</pre>
+<iframe id="app" title="Cocktails UI test" style="width:1200px;height:1500px;border:0"></iframe>
+<script>
+// Disposable browser profile only: this fixture replaces storage for its test origin.
+(async () => {
+  const result = document.getElementById('result');
+  const frame = document.getElementById('app');
+  const assert = (condition, message) => { if (!condition) throw new Error(message); };
+  const pause = () => new Promise(resolve => setTimeout(resolve, 60));
+  const fixture = {
+    inventory: [
+      {id:'plain',type:'Vodka',category:'Sprit',name:'Absolut Vodka',amount:70,unit:'cl',location:'Hemma'},
+      {id:'rhubarb-stock',type:'Vodka',category:'Sprit',name:'Hemgjord',variantId:'rhubarb',amount:20,unit:'cl',location:'Stugan'},
+      {id:'gin',type:'Gin',category:'Sprit',name:'Beefeater',amount:40,unit:'cl',location:'Hemma'},
+      {id:'tonic',type:'Tonic',category:'Mixer',name:'Indian Tonic Water',amount:40,unit:'cl',location:'Hemma'},
+      {id:'pink-stock',type:'Tonic',category:'Mixer',name:'Pink Grapefruit',variantId:'pink',amount:33,unit:'cl',location:'Hemma'},
+      {id:'cointreau',type:'Cointreau',category:'Likör',name:'Cointreau',amount:20,unit:'cl',location:'Hemma'}
+    ],
+    recipes: [],
+    ingredientVariants: [{id:'rhubarb',type:'Vodka',name:'Rhubarb'},{id:'pink',type:'Tonic',name:'Pink Grapefruit'}]
+  };
+  try {
+    localStorage.clear();
+    localStorage.setItem('cocktails:data:v1',JSON.stringify(fixture));
+    const load = () => new Promise(resolve => {frame.onload=resolve; frame.src='../index.html';});
+    await load();
+    let w=frame.contentWindow, d=frame.contentDocument;
+    const get=id=>d.getElementById(id);
+    const panel=()=>d.querySelector('[data-panel-id="type-summary"]');
+    const summaries=()=>get('typeSummary').textContent.replace(/\s+/g,' ').trim();
+    const values=()=>[...get('filterType').options].map(option=>option.value);
+    const change=(id,value,event='change')=>{const node=get(id);node.value=value;node.dispatchEvent(new w.Event(event,{bubbles:true}));};
+    const equal=(a,b,message)=>assert(JSON.stringify(a)===JSON.stringify(b),message+': '+JSON.stringify(a));
+    assert(panel().open,'Summary must default open');
+    assert(panel().querySelector('summary').textContent.includes('Sammanfattning per typ'),'Summary heading missing');
+    assert(get('typeSummaryCount').textContent==='(4 typer)','Unique type count incorrect');
+    assert(get('typeSummary').children.length===4,'Summary card count changed');
+    const originalSummary=summaries();
+    const vodka=[...get('typeSummary').children].find(node=>node.querySelector('strong').textContent==='Vodka');
+    assert(vodka.textContent.includes('Totalt 90 cl') && vodka.textContent.includes('Hemma 70 cl') && vodka.textContent.includes('Stugan 20 cl'),'Summary quantities changed');
+    const originalData=w.eval('JSON.stringify(state.data)');
+    const originalTypes=w.eval('JSON.stringify(ingredientTypesStore)');
+    const originalVariants=w.eval('JSON.stringify(ingredientVariantsStore)');
+    const rawData=localStorage.getItem('cocktails:data:v1');
+    equal(values(),['all','Cointreau','Gin','Tonic','Vodka'],'All types must come from stock only');
+    assert(get('filterType').options[0].textContent==='Alla typer','All types label missing');
+    change('filterCategory','Sprit');
+    equal(values(),['all','Gin','Vodka'],'Spirit type options incorrect');
+    change('filterType','Gin');
+    assert(get('inventoryList').children.length===1,'Gin filter failed');
+    change('filterCategory','Likör');
+    equal(values(),['all','Cointreau'],'Liqueur options incorrect');
+    assert(get('filterType').value==='all' && w.eval('state.filters.type')==='all','Invalid Gin selection retained');
+    change('filterType','Cointreau');
+    change('filterCategory','all');
+    assert(get('filterType').value==='Cointreau','Valid type selection was lost');
+    change('filterCategory','Sprit');
+    assert(get('filterType').value==='all','Liqueur type retained in Sprit');
+    change('filterType','Vodka');
+    change('filterLocation','Stugan');
+    change('filterSearch','rhubarb','input');
+    assert(get('inventoryList').querySelectorAll('.card').length===1 && get('inventoryList').textContent.includes('Hemgjord'),'Variant search + category + type + location failed');
+    change('filterLocation','Hemma');
+    assert(get('inventoryList').querySelectorAll('.card').length===0,'Location did not combine with variant search');
+    equal(values(),['all','Gin','Vodka'],'Location/search unexpectedly restricted type options');
+    assert(summaries()===originalSummary,'Filtering changed summary contents');
+    change('filterSearch','','input');
+    change('filterLocation','all');
+    change('filterCategory','Mixer');
+    equal(values(),['all','Tonic'],'Mixer options incorrect');
+    change('filterCategory','Garnityr');
+    equal(values(),['all'],'Empty stock category must contain only all-types choice');
+    change('filterCategory','all');
+    assert(get('inventoryList').querySelectorAll('.card').length===6,'Returning to all failed');
+    for(const width of [375,1200]) {
+      frame.style.width=width+'px';
+      await pause();
+      assert(d.documentElement.scrollWidth<=w.innerWidth,'Horizontal overflow at '+width);
+      for(const open of [false,true]) {
+        if(panel().open!==open) panel().querySelector('summary').click();
+        await pause();
+        assert(panel().open===open,'Toggle failed at '+width);
+        const marker=w.getComputedStyle(panel().querySelector('summary'),'::after').content;
+        assert(marker.includes(open?'-':'+'),'Nested section expansion marker incorrect');
+        if(!open) {
+          const headerBottom=panel().querySelector('summary').getBoundingClientRect().bottom;
+          const listTop=get('inventoryList').getBoundingClientRect().top;
+          assert(listTop-headerBottom>=0 && listTop-headerBottom<24,'Collapsed summary leaves blank area at '+width);
+        } else assert(summaries()===originalSummary,'Reopening changed summary quantities');
+      }
+    }
+    panel().querySelector('summary').click();
+    await pause();
+    assert(JSON.parse(localStorage.getItem('cocktails:panels:v1'))['type-summary']===false,'Collapsed choice not saved');
+    await load(); w=frame.contentWindow; d=frame.contentDocument;
+    assert(!panel().open,'Collapsed state lost after reload');
+    assert(get('inventoryList').querySelectorAll('.card').length===6,'Collapsed summary hid inventory cards');
+    panel().querySelector('summary').click();
+    await pause();
+    await load(); w=frame.contentWindow; d=frame.contentDocument;
+    assert(panel().open,'Expanded state lost after reload');
+    assert(summaries()===originalSummary,'Reload changed summary contents');
+    assert(w.eval('JSON.stringify(state.data)')===originalData,'UI changed inventory/recipes');
+    assert(w.eval('JSON.stringify(ingredientTypesStore)')===originalTypes,'UI changed type registry');
+    assert(w.eval('JSON.stringify(ingredientVariantsStore)')===originalVariants,'UI changed variants');
+    assert(localStorage.getItem('cocktails:data:v1')===rawData,'UI rewrote saved data');
+    result.textContent='PASS: summary toggle and saved state, unchanged quantities/data, dependent category/type filters, variant search + location, valid/invalid selections, 375px mobile and 1200px desktop layout';
+  } catch(error) {result.textContent='FAIL: '+error.stack;}
+})();
+</script>

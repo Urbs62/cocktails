@@ -1,0 +1,86 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Isolated expandable recipe card tests</title>
+<pre id="result">RUNNING</pre>
+<iframe id="app" title="Recipe card test" style="width:1200px;height:1400px;border:0"></iframe>
+<script>
+(async()=>{
+  const result=document.getElementById('result');
+  const frame=document.getElementById('app');
+  const assert=(value,message)=>{if(!value)throw new Error(message);};
+  const pause=()=>new Promise(resolve=>setTimeout(resolve,60));
+  const fixture={inventory:[{id:'vodka',type:'Vodka',category:'Sprit',name:'Absolut',amount:70,unit:'cl',location:'Hemma'}],recipes:[
+    {id:'highball',name:'A Drink med ett mycket långt namn som behöver radbrytas på mobil',category:'Highball',ingredients:[{type:'Vodka',amount:5,unit:'cl',optional:false}],instructions:'Bygg med is.',sourceUrl:'https://example.com/recipe'},
+    {id:'default',name:'B Standard',category:'Recept',ingredients:[{type:'Vodka',amount:5,unit:'cl',optional:false}],instructions:'Rör med is.',sourceUrl:''},
+    {id:'missing',name:'C Missing',category:'Sour',ingredients:[{type:'Tonic',amount:10,unit:'cl',optional:false}],instructions:'Toppa med tonic.',sourceUrl:''}
+  ],ingredientVariants:[]};
+  try{
+    localStorage.clear();
+    localStorage.setItem('cocktails:data:v1',JSON.stringify(fixture));
+    const load=()=>new Promise(resolve=>{frame.onload=resolve;frame.src='../index.html';});
+    await load();
+    let w=frame.contentWindow,d=frame.contentDocument;
+    const cards=()=>[...d.querySelectorAll('#recipeList > .recipe-card')];
+    const evaluate=code=>w.eval(code);
+    const visible=node=>node.checkVisibility();
+    const original=evaluate('JSON.stringify(createBackup())');
+    const savedData=localStorage.getItem('cocktails:data:v1');
+    const expectedStatuses=evaluate('JSON.stringify(state.data.recipes.map(getRecipeStatus))');
+    assert(cards().length===3 && cards().every(card=>!card.open),'All recipe cards must start collapsed');
+    assert(cards()[0].tagName==='DETAILS' && cards()[0].firstElementChild.tagName==='SUMMARY','Native keyboard-accessible disclosure missing');
+    assert(cards()[0].querySelector('summary .pill').textContent==='Kan göras','Available status changed');
+    assert(cards()[2].querySelector('summary .pill').textContent==='Saknar ingredienser','Missing status changed');
+    for(const card of cards()){
+      const summary=card.querySelector('summary');
+      assert(summary.children.length===2,'Collapsed header shows extra content');
+      assert(!visible(card.querySelector('.instructions')) && !visible(card.querySelector('[data-action="edit"]')),'Collapsed recipe body visible');
+      assert(!summary.textContent.includes('Highball'),'Classification leaked into collapsed status');
+    }
+    for(const width of [375,1200]){
+      frame.style.width=width+'px';await pause();
+      assert(d.documentElement.scrollWidth<=w.innerWidth,'Horizontal page overflow at '+width);
+      for(const card of cards()){
+        const summary=card.querySelector('summary');
+        assert(w.getComputedStyle(summary,'::after').content==='""','Disclosure arrow missing');
+        summary.click();await pause();
+        assert(card.open && visible(card.querySelector('.instructions')),'Recipe did not expand at '+width);
+        assert(visible(card.querySelector('[data-action="delete"]')),'Expanded actions hidden');
+        assert(card.getBoundingClientRect().right<=w.innerWidth,'Card overflow at '+width);
+        summary.click();await pause();
+        assert(!card.open && !visible(card.querySelector('.instructions')),'Recipe did not collapse at '+width);
+      }
+    }
+    cards()[0].querySelector('summary').click();
+    cards()[1].querySelector('summary').click();
+    cards()[2].querySelector('summary').click();await pause();
+    assert(cards().every(card=>!card.querySelector('.category-badge')),'Recipe classification badge displayed');
+    assert(!cards()[0].textContent.includes('Highball'),'Legacy classification displayed in expanded recipe');
+    assert(!cards()[2].textContent.includes('Sour'),'Other classification displayed in expanded recipe');
+    assert(cards()[0].textContent.includes('Vodka 5 cl') && cards()[0].textContent.includes('Bygg med is.'),'Recipe ingredients/instructions changed');
+    assert(cards()[0].querySelector('.source-link').getAttribute('href')==='https://example.com/recipe','Source link lost');
+    assert(cards()[2].querySelector('.missing').textContent.includes('Tonic 10 cl'),'Missing ingredient details lost');
+    cards()[0].querySelector('[data-action="edit"]').click();
+    assert(cards()[0].open,'Edit button collapsed card');
+    assert(d.getElementById('recipeId').value==='highball','Edit no longer opens correct recipe');
+    w.confirm=()=>false;
+    cards()[0].querySelector('[data-action="delete"]').click();
+    assert(cards()[0].open && cards().length===3,'Cancelled deletion collapsed or removed card');
+    assert(evaluate('JSON.stringify(state.data.recipes.map(getRecipeStatus))')===expectedStatuses,'Availability logic changed');
+    assert(localStorage.getItem('cocktails:data:v1')===savedData,'Opening cards or editing rewrote data');
+    // Only section settings may change when the existing recipe editor opens.
+    const backup=JSON.parse(evaluate('JSON.stringify(createBackup())'));
+    const before=JSON.parse(original);delete backup.settings;delete before.settings;
+    assert(JSON.stringify(backup)===JSON.stringify(before),'GUI changed recipe data or registry');
+    assert(evaluate('JSON.stringify(normalizeBackup(JSON.parse(JSON.stringify(createBackup()))).data.recipes) === JSON.stringify(state.data.recipes)'),'JSON export/import changed category metadata');
+    await load();w=frame.contentWindow;d=frame.contentDocument;
+    assert(cards().every(card=>!card.open),'Expanded recipe state persisted after reload');
+    cards()[2].querySelector('summary').click();
+    assert(cards()[2].open,'Missing recipe failed to reopen');
+    w.confirm=()=>true;
+    cards()[2].querySelector('[data-action="delete"]').click();
+    assert(cards().length===2 && evaluate('state.data.recipes.every(recipe=>recipe.id!=="missing")'),'Confirmed deletion no longer works');
+    assert(evaluate('state.data.recipes[0].category')==='Highball' && evaluate('state.data.recipes[1].category')==='Recept','Stored classifications changed');
+    result.textContent='PASS: collapsed startup/reload, expand/collapse, availability/missing details, no classification labels, edit/delete/source actions, unchanged category metadata, 375px mobile and 1200px desktop';
+  }catch(error){result.textContent='FAIL: '+error.stack;}
+})();
+</script>

@@ -167,7 +167,7 @@ small {
   overflow: clip;
 }
 
-.panel summary {
+.panel > summary {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -177,11 +177,11 @@ small {
   list-style: none;
 }
 
-.panel summary::-webkit-details-marker {
+.panel > summary::-webkit-details-marker {
   display: none;
 }
 
-.panel summary::after {
+.panel > summary::after {
   content: "+";
   flex: 0 0 auto;
   color: var(--accent);
@@ -189,15 +189,15 @@ small {
   font-weight: 900;
 }
 
-.panel[open] summary::after {
+.panel[open] > summary::after {
   content: "-";
 }
 
-.panel summary span {
+.panel > summary span {
   font-weight: 850;
 }
 
-.panel summary small {
+.panel > summary small {
   min-width: 0;
   margin-left: auto;
   overflow: hidden;
@@ -298,6 +298,54 @@ textarea:focus {
   min-height: 42px;
 }
 
+.variant-list {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.variant-list-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.variant-list-row button {
+  flex-shrink: 0;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.inventory-variant-field {
+  display: flex;
+  align-items: end;
+  gap: 0.5rem;
+}
+
+.inventory-variant-field label {
+  flex: 1;
+  min-width: 0;
+}
+
+.inventory-variant-field button {
+  flex-shrink: 0;
+}
+
+.ingredient-row .variant-field {
+  grid-column: 2 / -1;
+}
+
+#variantForm {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+#definitionNewTypeFields[hidden] {
+  display: none;
+}
+
 .ingredient-row .optional-field input {
   width: auto;
 }
@@ -308,6 +356,11 @@ textarea:focus {
 
 .ingredient-row button {
   grid-column: 1 / -1;
+}
+
+.type-summary-panel {
+  margin-top: 0.8rem;
+  box-shadow: none;
 }
 
 .type-summary {
@@ -370,6 +423,68 @@ textarea:focus {
   border-radius: 8px;
   background: var(--panel-2);
   padding: 0.75rem;
+}
+
+.shopping-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 240px);
+  margin: 0.85rem 0;
+}
+
+.shopping-item {
+  display: grid;
+  gap: 0.25rem;
+  overflow-wrap: anywhere;
+}
+
+.shopping-item span {
+  font-size: 0.85rem;
+}
+
+.recipe-card {
+  padding: 0;
+}
+
+.recipe-toggle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 0.5rem;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.75rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.recipe-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.recipe-toggle > strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.recipe-toggle::after {
+  content: "";
+  width: 0.4rem;
+  height: 0.4rem;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(-45deg);
+}
+
+.recipe-card[open] > .recipe-toggle::after {
+  transform: rotate(45deg);
+}
+
+.recipe-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+  border-radius: 8px;
+}
+
+.recipe-body {
+  padding: 0 0.75rem 0.75rem;
 }
 
 .card-head {

@@ -1,0 +1,107 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Isolated shopping list tests</title>
+<pre id="result">RUNNING</pre>
+<iframe id="app" title="Shopping list test" style="width:1200px;height:1500px;border:0"></iframe>
+<script>
+(async()=>{
+  const result=document.getElementById('result'),frame=document.getElementById('app');
+  const assert=(value,message)=>{if(!value)throw new Error(message);};
+  const pause=()=>new Promise(resolve=>setTimeout(resolve,60));
+  const req=(type,variantId='',optional=false)=>({type,variantId,optional,amount:500,unit:'cl'});
+  const stock=(id,type,location,variantId='')=>({id,type,location,variantId,name:id,category:'Sprit',amount:0.1,unit:'ml'});
+  const recipe=(id,name,ingredients)=>({id,name,category:'Recept',ingredients,instructions:'Build',sourceUrl:''});
+  const fixture={inventory:[stock('Rhubarb stock','Vodka','Hemma','r'),stock('Plain Vodka','Vodka','Stugan'),stock('Gin Home','Gin','Hemma'),stock('Gin Away','Gin','Stugan')],ingredientVariants:[{id:'r',type:'Vodka',name:'Rhubarb'}],recipes:[
+    recipe('z','Zulu',[req('Tequila'),req('Triple sec'),req('Limejuice','',true)]),
+    recipe('a','Alpha',[req('Tequila'),req('Vodka')]),
+    recipe('r','Rhubarb drink',[req('Vodka','r')]),
+    recipe('g','Gin drink',[req('Gin')]),
+    recipe('o','Ö-drink',[req('Tequila')])
+  ]};
+  try{
+    localStorage.clear();localStorage.setItem('cocktails:data:v1',JSON.stringify(fixture));
+    const load=()=>new Promise(resolve=>{frame.onload=resolve;frame.src='../index.html';});
+    await load();let w=frame.contentWindow,d=frame.contentDocument;
+    const get=id=>d.getElementById(id),evaluate=code=>w.eval(code);
+    const panel=()=>d.querySelector('[data-panel-id="shopping"]');
+    const change=(node,value,event='change')=>{node.value=value;node.dispatchEvent(new w.Event(event,{bubbles:true}));};
+    const labels=()=>[...get('shoppingList').querySelectorAll('strong')].map(node=>node.textContent);
+    const equal=(a,b,message)=>assert(JSON.stringify(a)===JSON.stringify(b),message+': '+JSON.stringify(a));
+    const inventoryCard=name=>[...get('inventoryList').querySelectorAll('.card')].find(card=>card.querySelector('.card-title strong').textContent===name);
+    const recipeField=name=>get('recipeIngredientRows').querySelector(`[data-field="${name}"]`);
+    const rawData=localStorage.getItem('cocktails:data:v1');
+    const backupKeys=Object.keys(JSON.parse(evaluate('JSON.stringify(createBackup())'))).sort();
+    assert(!panel().open,'Shopping section must default collapsed');
+    assert(panel().previousElementSibling.dataset.panelId==='recipes','Shopping section not directly after recipes');
+    equal([...get('shoppingLocation').options].map(node=>node.value),['Hemma','Stugan'],'Location choices differ from inventory');
+    equal(labels(),['Tequila','Triple sec'],'Home missing list incorrect');
+    assert(get('shoppingCount').textContent==='(2 saknas)','Home count incorrect');
+    assert(get('shoppingList').querySelector('.shopping-item span').textContent==='Alpha, Zulu, Ö-drink','Recipe references not sorted/deduplicated');
+    assert(get('recipeList').querySelectorAll('.recipe-card').length===5,'Recipe cards changed');
+    assert(get('inventoryList').querySelectorAll('.card').length===4,'Inventory cards changed');
+    assert([...get('recipeList').querySelectorAll('.recipe-card')].every(card=>!card.open),'Recipe cards no longer start collapsed');
+    assert(!evaluate('getRecipeStatus(state.data.recipes[3]).canMake'),'Recipe quantity checks unexpectedly changed');
+    panel().querySelector('summary').click();await pause();
+    assert(panel().open,'Shopping list failed to expand');
+    change(get('shoppingLocation'),'Stugan');
+    equal(labels(),['Tequila','Triple sec','Vodka / Rhubarb'],'Location/variant matching incorrect');
+    assert(localStorage.getItem('cocktails:data:v1')===rawData,'Reading list or changing location modified records');
+    await load();w=frame.contentWindow;d=frame.contentDocument;
+    assert(get('shoppingLocation').value==='Stugan','Selected location lost after reload');
+    equal(labels(),['Tequila','Triple sec','Vodka / Rhubarb'],'Reload changed missing list');
+    // Submit real inventory form, then edit/move/delete the added stock.
+    get('inventoryForm').closest('details').open=true;
+    change(get('inventoryType'),'Tequila');
+    get('inventoryName').value='Bought tequila';get('inventoryAmount').value='1';get('inventoryUnit').value='ml';
+    get('inventoryLocation').value='Stugan';get('inventoryForm').requestSubmit();
+    equal(labels(),['Triple sec','Vodka / Rhubarb'],'New stock did not remove shopping item');
+    const stockId=evaluate('state.data.inventory.find(entry=>entry.name==="Bought tequila").id');
+    evaluate(`editInventory(${JSON.stringify(stockId)})`);
+    get('inventoryAmount').value='0';get('inventoryForm').requestSubmit();
+    assert(labels().includes('Tequila'),'Edited empty stock did not restore missing ingredient');
+    evaluate(`editInventory(${JSON.stringify(stockId)})`);
+    get('inventoryAmount').value='1';get('inventoryForm').requestSubmit();
+    assert(!labels().includes('Tequila'),'Edited stock did not refresh presence');
+    inventoryCard('Bought tequila').querySelector('[data-action="move"]').click();
+    assert(labels().includes('Tequila'),'Moving stock away did not update list');
+    change(get('shoppingLocation'),'Hemma');
+    assert(!labels().includes('Tequila'),'Moved stock not recognized at destination');
+    change(get('shoppingLocation'),'Stugan');
+    w.confirm=()=>true;
+    inventoryCard('Bought tequila').querySelector('[data-action="delete"]').click();
+    change(get('shoppingLocation'),'Hemma');assert(labels().includes('Tequila'),'Deleted stock still matched');
+    change(get('shoppingLocation'),'Stugan');
+    // Create, edit and delete a recipe through existing forms/actions.
+    get('recipeForm').closest('details').open=true;
+    get('recipeName').value='New recipe';get('recipeInstructions').value='Build';
+    change(recipeField('type'),'Cola');recipeField('amount').value='10';get('recipeForm').requestSubmit();
+    assert(labels().includes('Cola'),'New recipe did not add missing ingredient');
+    const recipeId=evaluate('state.data.recipes.find(recipe=>recipe.name==="New recipe").id');
+    evaluate(`editRecipe(${JSON.stringify(recipeId)})`);
+    change(recipeField('type'),'Citronjuice');get('recipeForm').requestSubmit();
+    assert(labels().includes('Citronjuice')&&!labels().includes('Cola'),'Edited recipe requirements not reflected');
+    const card=[...get('recipeList').querySelectorAll('.recipe-card')].find(card=>card.querySelector('summary strong').textContent==='New recipe');
+    card.querySelector('summary').click();card.querySelector('[data-action="delete"]').click();
+    assert(!labels().includes('Citronjuice'),'Deleted recipe left shopping item');
+    // Import JSON with all required ingredient types present on the selected place.
+    const imported={...fixture,inventory:[...fixture.inventory,stock('Tequila Away','Tequila','Stugan'),stock('Triple Away','Triple sec','Stugan'),stock('Rhubarb Away','Vodka','Stugan','r')]};
+    evaluate(`restoreBackup(normalizeBackup(JSON.parse(${JSON.stringify(JSON.stringify(imported))})))`);
+    equal(labels(),[],'JSON restore did not update shopping list');
+    assert(get('shoppingCount').textContent==='(0 saknas)','Empty count incorrect');
+    assert(get('shoppingList').textContent==='Du har alla ingredienser för dina registrerade recept på denna plats.','Empty-list message incorrect');
+    equal(Object.keys(JSON.parse(evaluate('JSON.stringify(createBackup())'))).sort(),backupKeys,'Backup format changed');
+    assert(!JSON.parse(localStorage.getItem('cocktails:data:v1')).shoppingList,'Shopping content persisted into source snapshot');
+    change(get('shoppingLocation'),'Hemma');
+    if(!panel().open)panel().querySelector('summary').click();
+    for(const width of [375,1200]){
+      frame.style.width=width+'px';await pause();
+      assert(d.documentElement.scrollWidth<=w.innerWidth,'Page overflow at '+width);
+      assert(get('shoppingLocation').getBoundingClientRect().right<=w.innerWidth,'Location selector overflow at '+width);
+      assert([...get('shoppingList').children].every(node=>node.getBoundingClientRect().right<=w.innerWidth),'Shopping cards overflow at '+width);
+      panel().querySelector('summary').click();await pause();assert(!panel().open,'Collapse failed');
+      panel().querySelector('summary').click();await pause();assert(panel().open,'Expand failed');
+    }
+    result.textContent='PASS: section/default state, persisted location, unique ingredient/recipe lists, shared variant matching, optional ingredients, presence without quantities, inventory add/edit/move/delete, recipe add/edit/delete, JSON import, empty state, unchanged backup format, mobile/desktop and existing cards';
+  }catch(error){result.textContent='FAIL: '+error.stack;}
+})();
+</script>
