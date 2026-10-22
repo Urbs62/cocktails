@@ -55,4 +55,30 @@ assert.equal(list('Hemma').length,0);
 assert.equal(app(data,{'cocktails:shopping:location':JSON.stringify('Stugan')}).run('state.shoppingLocation'),'Stugan');
 assert.equal(app(data,{'cocktails:shopping:location':JSON.stringify('invalid')}).run('state.shoppingLocation'),'Hemma');
 assert.equal(app(data,{'cocktails:shopping:location':'broken'}).run('state.shoppingLocation'),'Hemma');
+// Combined mode checks presence at either place, including exact variants.
+const combinedData={inventory:[
+  stock('gin-home','Gin','Hemma'),stock('cointreau-away','Cointreau','Stugan'),
+  stock('rhubarb-home','Vodka','Hemma','r'),stock('rhubarb-empty','Vodka','Stugan','r','cl',0),
+  stock('tonic-home-empty','Tonic','Hemma','','st',0),stock('tonic-away-empty','Tonic','Stugan','','cl',0),
+  stock('plain-away','Vodka','Stugan')
+],ingredientVariants:[{id:'r',type:'Vodka',name:'Rhubarb'},{id:'p',type:'Vodka',name:'Pear'}],recipes:[
+  recipe('one','Alpha',[req('Gin'),req('Cointreau'),req('Tequila'),req('Vodka','r'),req('Vodka','p'),req('Tonic'),req('Limejuice','',true)]),
+  recipe('two','Zulu',[req('Tequila'),req('Tequila')])
+]};
+const combined=app(combinedData,{'cocktails:shopping:location':JSON.stringify('Hemma/Stugan')});
+const combinedList=location=>JSON.parse(combined.run(`JSON.stringify(getShoppingList(${JSON.stringify(location)}))`));
+const combinedBefore=combined.run('JSON.stringify(createBackup())');
+const combinedStored=combined.storage.get('cocktails:data:v1');
+assert.equal(combined.run('state.shoppingLocation'),'Hemma/Stugan');
+assert.deepEqual(combinedList('Hemma').map(e=>e.label),['Cointreau','Tequila','Tonic','Vodka / Pear']);
+assert.deepEqual(combinedList('Stugan').map(e=>e.label),['Gin','Tequila','Tonic','Vodka / Pear','Vodka / Rhubarb']);
+assert.deepEqual(combinedList('Hemma/Stugan').map(e=>e.label),['Tequila','Tonic','Vodka / Pear']);
+assert.deepEqual(combinedList('Hemma/Stugan')[0].recipes,['Alpha','Zulu']);
+assert.equal(combined.run('JSON.stringify(createBackup())'),combinedBefore);
+assert.equal(combined.storage.get('cocktails:data:v1'),combinedStored);
+combined.run(`render=()=>{}; updateInventory('rhubarb-home',{amount:0})`);
+assert.equal(combinedList('Hemma/Stugan').some(e=>e.label==='Vodka / Rhubarb'),true);
+combined.run(`updateInventory('rhubarb-empty',{amount:1})`);
+assert.equal(combinedList('Hemma/Stugan').some(e=>e.label==='Vodka / Rhubarb'),false);
+console.log('PASS: combined shopping presence at either place, zero balances, exact variants, optional exclusion, deduplication, recipe names, updates, unchanged data/backup and saved combined preference');
 console.log('PASS: shopping presence by place/type/variant, deduplication, Swedish sorting, optional ingredients, quantities/units ignored, updates, unchanged source data and location preference');

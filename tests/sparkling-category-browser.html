@@ -1,0 +1,49 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Sparkling wine category tests</title>
+<pre id="result">RUNNING</pre>
+<iframe id="app" title="Category test" style="width:375px;height:1400px;border:0"></iframe>
+<script>
+(async()=>{
+  const result=document.getElementById('result'),frame=document.getElementById('app');
+  const assert=(value,message)=>{if(!value)throw new Error(message);};
+  try{
+    localStorage.clear();
+    localStorage.setItem('cocktails:data:v1',JSON.stringify({inventory:[],recipes:[],ingredientVariants:[],ingredientTypes:[]}));
+    const load=()=>new Promise(resolve=>{frame.onload=resolve;frame.src='../index.html';});
+    await load();let w=frame.contentWindow,d=frame.contentDocument;
+    const get=id=>d.getElementById(id),evaluate=code=>w.eval(code);
+    const change=(id,value)=>{get(id).value=value;get(id).dispatchEvent(new w.Event('change',{bubbles:true}));};
+    assert(evaluate('ingredientTypesStore.length')===0,'Automatic types created');
+    assert([...get('newTypeCategory').options].some(option=>option.value==='Mousserande vin'),'Create category option missing');
+    get('newTypeName').value='Prosecco';get('newTypeCategory').value='Mousserande vin';get('typeForm').requestSubmit();
+    assert(evaluate(`getIngredientCategory('Prosecco')`)==='Mousserande vin','Create lost category');
+    evaluate(`ingredientTypesStore.push({id:'champagne',type:'Champagne',category:'Övrigt'});persistIngredientTypes();refreshTypeControls();render()`);
+    d.querySelector('[aria-label="Redigera Champagne"]').click();
+    const form=d.querySelector('.structure-edit-form');
+    assert(form.querySelector('select').value==='Övrigt','Editor lost current category');
+    form.querySelector('select').value='Mousserande vin';form.requestSubmit();
+    assert(evaluate(`getIngredientCategory('Champagne')`)==='Mousserande vin','Edit lost category');
+    change('inventoryType','Prosecco');get('inventoryName').value='Prosecco bottle';get('inventoryAmount').value='75';get('inventoryUnit').value='cl';get('inventoryLocation').value='Hemma';get('inventoryForm').requestSubmit();
+    assert(get('inventoryList').textContent.includes('Mousserande vin'),'Inventory category missing');
+    change('filterCategory','Mousserande vin');
+    assert(get('inventoryList').querySelectorAll('.card').length===1,'Category filter failed');
+    assert([...get('filterType').options].some(option=>option.value==='Prosecco'),'Type filter failed');
+    change('filterCategory','Sprit');assert(!get('inventoryList').querySelector('.card'),'Category filter leaked stock');
+    change('filterCategory','all');
+    evaluate(`state.data.inventory.push({id:'vermouth',type:'Söt vermouth',name:'Vermouth bottle',category:'Vermouth & Starkvin',amount:1,unit:'cl',location:'Hemma'},{id:'bitters',type:'Angostura bitters',name:'Bitters bottle',category:'Bitters & Smaksättare',amount:1,unit:'cl',location:'Hemma'});render()`);
+    assert([...get('inventoryList').querySelectorAll('.card-title strong')].map(node=>node.textContent).join('|')==='Vermouth bottle|Prosecco bottle|Bitters bottle','Sparkling category order incorrect');
+    // Remove temporary sorting entries before checking the persisted category round-trip.
+    evaluate(`state.data.inventory=state.data.inventory.filter(entry=>!['vermouth','bitters'].includes(entry.id));persistAndRender()`);
+    const backup=evaluate('JSON.stringify(createBackup())');
+    evaluate(`restoreBackup(normalizeBackup(JSON.parse(${JSON.stringify(backup)})))`);
+    assert(evaluate(`getIngredientCategory('Prosecco')`)==='Mousserande vin','JSON import lost category');
+    await load();w=frame.contentWindow;d=frame.contentDocument;
+    const reloaded=JSON.parse(evaluate('JSON.stringify(createBackup())')),original=JSON.parse(backup);
+    for(const field of ['inventory','recipes','ingredientVariants']) assert(JSON.stringify(reloaded[field])===JSON.stringify(original[field]),'Reload changed '+field);
+    assert(JSON.stringify(reloaded.ingredientTypes.sort((a,b)=>a.id.localeCompare(b.id)))===JSON.stringify(original.ingredientTypes.sort((a,b)=>a.id.localeCompare(b.id))),'Reload changed type definitions');
+    assert(evaluate(`getIngredientCategory('Champagne')`)==='Mousserande vin','Reload lost edited category');
+    result.textContent='PASS: no automatic types, create/edit category selectors, inventory registration/filter/type filter, category ordering, JSON export/import and reload';
+  }catch(error){result.textContent='FAIL: '+error.stack;}
+})();
+</script>

@@ -33,7 +33,7 @@
     const backupKeys=Object.keys(JSON.parse(evaluate('JSON.stringify(createBackup())'))).sort();
     assert(!panel().open,'Shopping section must default collapsed');
     assert(panel().previousElementSibling.dataset.panelId==='recipes','Shopping section not directly after recipes');
-    equal([...get('shoppingLocation').options].map(node=>node.value),['Hemma','Stugan'],'Location choices differ from inventory');
+    equal([...get('shoppingLocation').options].map(node=>node.value),['Hemma','Stugan','Hemma/Stugan'],'Shopping location choices/order incorrect');
     equal(labels(),['Tequila','Triple sec'],'Home missing list incorrect');
     assert(get('shoppingCount').textContent==='(2 saknas)','Home count incorrect');
     assert(get('shoppingList').querySelector('.shopping-item span').textContent==='Alpha, Zulu, Ö-drink','Recipe references not sorted/deduplicated');
@@ -49,6 +49,18 @@
     await load();w=frame.contentWindow;d=frame.contentDocument;
     assert(get('shoppingLocation').value==='Stugan','Selected location lost after reload');
     equal(labels(),['Tequila','Triple sec','Vodka / Rhubarb'],'Reload changed missing list');
+    change(get('shoppingLocation'),'Hemma/Stugan');
+    equal(labels(),['Tequila','Triple sec'],'Combined mode did not recognize stock at either place');
+    assert(localStorage.getItem('cocktails:data:v1')===rawData,'Combined mode changed source data');
+    await load();w=frame.contentWindow;d=frame.contentDocument;
+    assert(get('shoppingLocation').value==='Hemma/Stugan','Combined selection lost after reload');
+    equal(labels(),['Tequila','Triple sec'],'Combined reload changed list');
+    evaluate(`updateInventory('Rhubarb stock',{amount:0})`);
+    assert(labels().includes('Vodka / Rhubarb'),'Zero stock matched in combined mode');
+    evaluate(`state.data.inventory.push(${JSON.stringify(stock('Rhubarb refill','Vodka','Stugan','r'))}); persistAndRender()`);
+    assert(!labels().includes('Vodka / Rhubarb'),'Positive variant at other place not recognized');
+    evaluate(`state.data.inventory=state.data.inventory.filter(entry=>entry.id!=='Rhubarb refill'); updateInventory('Rhubarb stock',{amount:0.1})`);
+    change(get('shoppingLocation'),'Stugan');
     // Submit real inventory form, then edit/move/delete the added stock.
     get('inventoryForm').closest('details').open=true;
     change(get('inventoryType'),'Tequila');
@@ -89,6 +101,9 @@
     equal(labels(),[],'JSON restore did not update shopping list');
     assert(get('shoppingCount').textContent==='(0 saknas)','Empty count incorrect');
     assert(get('shoppingList').textContent==='Du har alla ingredienser för dina registrerade recept på denna plats.','Empty-list message incorrect');
+    change(get('shoppingLocation'),'Hemma/Stugan');
+    equal(labels(),[],'Combined list should be empty after import');
+    assert(get('shoppingList').textContent==='Du har alla ingredienser för dina registrerade recept hemma eller i stugan.','Combined empty message incorrect');
     equal(Object.keys(JSON.parse(evaluate('JSON.stringify(createBackup())'))).sort(),backupKeys,'Backup format changed');
     assert(!JSON.parse(localStorage.getItem('cocktails:data:v1')).shoppingList,'Shopping content persisted into source snapshot');
     change(get('shoppingLocation'),'Hemma');

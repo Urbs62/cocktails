@@ -429,6 +429,7 @@ textarea:focus {
   display: grid;
   grid-template-columns: minmax(0, 240px);
   margin: 0.85rem 0;
+  gap: 0.65rem;
 }
 
 .shopping-item {
@@ -767,6 +768,12 @@ a {
   color: var(--muted);
 }
 
+.structure-type-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
 .structure-edit-form {
   grid-column: 1 / -1;
   display: grid;
@@ -997,6 +1004,7 @@ a {
 
 @media print {
   @page {
+    size: A4;
     margin: 12mm;
   }
 
@@ -1047,5 +1055,56 @@ a {
 
   .print-location h2 {
     break-after: avoid;
+  }
+
+  body[data-print-target="shopping"] .shell {
+    display: none !important;
+  }
+
+  body[data-print-target="shopping"] .shopping-print {
+    display: block !important;
+    background: #fff;
+    color: #000;
+    font: 11pt/1.35 Arial, sans-serif;
+    overflow-wrap: anywhere;
+  }
+
+  .shopping-print h1 {
+    margin: 0 0 4mm;
+    color: #000;
+    font-size: 18pt;
+  }
+
+  .shopping-print header {
+    break-inside: avoid;
+    break-after: avoid;
+  }
+
+  .shopping-print-list {
+    list-style: none;
+    margin: 5mm 0 0;
+    padding: 0;
+  }
+
+  .shopping-print-list li {
+    display: flex;
+    align-items: flex-start;
+    gap: 3mm;
+    padding: 2mm 0;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .shopping-print-checkbox {
+    flex: 0 0 3.5mm;
+    height: 3.5mm;
+    margin-top: 0.5mm;
+    border: 1px solid #000;
+  }
+
+  .shopping-print-list small {
+    display: block;
+    margin-top: 1mm;
+    font-size: 9pt;
   }
 }

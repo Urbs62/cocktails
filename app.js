@@ -7,8 +7,9 @@ const LAST_EXPORTED_KEY = "cocktails:backup:lastExportedAt";
 const LAST_RESTORED_KEY = "cocktails:backup:lastRestoredAt";
 const VERMOUTH_CATEGORY_MIGRATION_KEY = "cocktails:migration:vermouth-category:v1";
 const LOCATIONS = ["Hemma", "Stugan"];
-const CATEGORY_OPTIONS = ["Sprit", "Likör", "Vermouth & Starkvin", "Mixer", "Juice & Syrup", "Bitters & Smaksättare", "Garnityr", "Övrigt"];
-const INVENTORY_CATEGORY_ORDER = ["Sprit", "Likör", "Vermouth & Starkvin", "Bitters & Smaksättare", "Juice & Syrup", "Mixer", "Garnityr", "Övrigt"];
+const SHOPPING_LOCATIONS = [...LOCATIONS, "Hemma/Stugan"];
+const CATEGORY_OPTIONS = ["Sprit", "Likör", "Vermouth & Starkvin", "Mousserande vin", "Mixer", "Juice & Syrup", "Bitters & Smaksättare", "Garnityr", "Övrigt"];
+const INVENTORY_CATEGORY_ORDER = ["Sprit", "Likör", "Vermouth & Starkvin", "Mousserande vin", "Bitters & Smaksättare", "Juice & Syrup", "Mixer", "Garnityr", "Övrigt"];
 const VERMOUTH_CATEGORY = "Vermouth & Starkvin";
 const VERMOUTH_TYPE_KEYS = new Set([
   "Söt vermouth",
@@ -125,7 +126,7 @@ function ingredient(type, amount = null, unit = "", optional = false, variantId 
 function bindElements() {
   [
     "inventoryCount", "recipeCount", "makeableCount", "inventorySummaryText", "recipeSummaryText",
-    "shoppingLocation", "shoppingCount", "shoppingList",
+    "shoppingLocation", "shoppingCount", "shoppingList", "printShoppingBtn", "shoppingPrint",
     "filterLocation", "filterCategory", "filterType", "filterSearch", "typeSummary", "typeSummaryCount", "inventoryList", "recipeList",
     "inventoryForm", "inventoryId", "inventoryType", "inventoryName",
     "inventoryAmount", "inventoryUnit", "inventoryLocation", "inventoryFormMode",
@@ -145,10 +146,10 @@ function bindElements() {
 }
 
 function bindEvents() {
-  els.shoppingLocation.replaceChildren(...LOCATIONS.map((location) => option(location, location)));
+  els.shoppingLocation.replaceChildren(...SHOPPING_LOCATIONS.map((location) => option(location, location)));
   els.shoppingLocation.value = state.shoppingLocation;
   els.shoppingLocation.addEventListener("change", () => {
-    state.shoppingLocation = LOCATIONS.includes(els.shoppingLocation.value) ? els.shoppingLocation.value : LOCATIONS[0];
+    state.shoppingLocation = SHOPPING_LOCATIONS.includes(els.shoppingLocation.value) ? els.shoppingLocation.value : LOCATIONS[0];
     localStorage.setItem(SHOPPING_LOCATION_KEY, JSON.stringify(state.shoppingLocation));
     renderShoppingList();
   });
@@ -202,7 +203,12 @@ function bindEvents() {
   els.restoreDialog.addEventListener("cancel", clearPendingRestore);
   els.togglePrintPreview.addEventListener("click", togglePrintPreview);
   els.printInventoryBtn.addEventListener("click", printInventory);
-  window.addEventListener("beforeprint", prepareInventoryPrint);
+  els.printShoppingBtn.addEventListener("click", printShoppingList);
+  window.addEventListener("beforeprint", () => {
+    if (document.body.dataset.printTarget === "shopping") prepareShoppingPrint();
+    else prepareInventoryPrint();
+  });
+  window.addEventListener("afterprint", () => { delete document.body.dataset.printTarget; });
   addRecipeIngredientRow();
 }
 
@@ -485,10 +491,13 @@ function renderStructureRow(row) {
       const form = el("form", "structure-edit-form");
       form.innerHTML = `
         <label><span>Namn på ingredienstyp</span><input required aria-label="Namn på ingredienstyp"></label>
+        <label><span>Kategori</span><select required aria-label="Kategori"></select></label>
         <div class="form-actions"><button class="primary" type="submit">Spara</button><button type="button">Avbryt</button></div>
         <small role="alert"></small>`;
       const input = form.querySelector("input");
       input.value = row.type;
+      const categorySelect = form.querySelector("select");
+      populateCategorySelect(categorySelect, getIngredientDefinition(row.type)?.category);
       form.querySelector('button[type="button"]').addEventListener("click", () => {
         form.remove();
         edit.hidden = false;
@@ -496,7 +505,7 @@ function renderStructureRow(row) {
       });
       form.addEventListener("submit", (event) => {
         event.preventDefault();
-        const error = renameIngredientType(getIngredientDefinition(row.type)?.id, input.value);
+        const error = renameIngredientType(getIngredientDefinition(row.type)?.id, input.value, categorySelect.value);
         if (error) {
           form.querySelector('[role="alert"]').textContent = error;
           input.focus();
@@ -507,14 +516,44 @@ function renderStructureRow(row) {
       input.focus();
       input.select();
     });
-    node.querySelector(".structure-type").append(edit);
+    const remove = el("button", "structure-edit");
+    remove.type = "button";
+    remove.textContent = "Ta bort";
+    remove.setAttribute("aria-label", `Ta bort ${row.type}`);
+    remove.addEventListener("click", () => deleteIngredientType(getIngredientDefinition(row.type)?.id));
+    const actions = el("div", "structure-type-actions");
+    actions.append(edit, remove);
+    node.querySelector(".structure-type").append(actions);
   }
   return node;
 }
 
-function renameIngredientType(id, value) {
+function deleteIngredientType(id) {
+  const definition = ingredientTypesStore.find((entry) => entry.id === id);
+  if (!definition) return;
+  const matches = (entry) => normalizeKey(entry.type) === normalizeKey(definition.type);
+  const inventoryCount = state.data.inventory.filter(matches).length;
+  const recipeCount = state.data.recipes.filter((entry) => entry.ingredients.some(matches)).length;
+  const variantCount = ingredientVariantsStore.filter(matches).length;
+  if (inventoryCount || recipeCount || variantCount) {
+    alert(`Kan inte ta bort ${definition.type}. Typen används i ${inventoryCount} lagerposter, ${recipeCount} recept och ${variantCount} registrerade varianter. Ta bort kopplingarna först.`);
+    return;
+  }
+  if (!confirm(`Ta bort ingredienstypen ${definition.type}?`)) return;
+  ingredientTypesStore = ingredientTypesStore.filter((entry) => entry.id !== id);
+  persistIngredientTypes();
+  // Clear unsaved selections rather than retaining the removed type as unknown.
+  refreshTypeControls(definition.type, "");
+  [...els.definitionType.options].filter((option) => matches({ type: option.value })).forEach((option) => option.remove());
+  render();
+  showToast("Ingredienstypen är borttagen.");
+}
+
+function renameIngredientType(id, value, category) {
   const definition = ingredientTypesStore.find((entry) => entry.id === id);
   if (!definition) return "Typen finns inte längre.";
+  category = category ?? definition.category;
+  if (!CATEGORY_OPTIONS.includes(category)) return "Välj en giltig kategori.";
   const name = normalizeLabel(value);
   if (!name) return "Ange ett namn på typen.";
   const oldKey = normalizeKey(definition.type);
@@ -526,10 +565,11 @@ function renameIngredientType(id, value) {
     return "Typen finns redan.";
   }
   const rename = (entry) => normalizeKey(entry.type) === oldKey ? { ...entry, type: name } : entry;
-  ingredientTypesStore = ingredientTypesStore.map((entry) => entry.id === id ? { ...entry, type: name } : entry);
+  ingredientTypesStore = ingredientTypesStore.map((entry) => entry.id === id ? { ...entry, type: name, category } : entry);
   ingredientVariantsStore = ingredientVariantsStore.map(rename);
   state.data = { ...state.data,
-    inventory: state.data.inventory.map(rename),
+    inventory: state.data.inventory.map((entry) => normalizeKey(entry.type) === oldKey && category !== definition.category
+      ? { ...entry, type: name, category } : rename(entry)),
     recipes: state.data.recipes.map((entry) => ({ ...entry, ingredients: entry.ingredients.map(rename) }))
   };
   if (normalizeKey(state.filters.type) === oldKey) {
@@ -540,7 +580,7 @@ function renameIngredientType(id, value) {
   persistIngredientTypes();
   refreshTypeControls(definition.type, name);
   render();
-  showToast("Typens namn uppdaterat.");
+  showToast(category !== definition.category ? "Ingredienstypen uppdaterad." : "Typens namn uppdaterat.");
   return "";
 }
 
@@ -561,7 +601,37 @@ function prepareInventoryPrint() {
 }
 
 function printInventory() {
+  document.body.dataset.printTarget = "inventory";
   prepareInventoryPrint();
+  window.print();
+}
+
+function prepareShoppingPrint() {
+  const entries = getShoppingList(state.shoppingLocation);
+  const header = el("header");
+  header.innerHTML = `
+    <h1>Cocktails – Inköpslista</h1>
+    <p>Vald plats: ${escapeHtml(state.shoppingLocation)}<br>
+    Utskriftsdatum: ${escapeHtml(formatPrintDate(new Date()))}<br>
+    Antal saknade ingredienser: ${entries.length}</p>`;
+  const list = el("ul", "shopping-print-list");
+  entries.forEach((entry) => {
+    const row = el("li");
+    row.innerHTML = `<span class="shopping-print-checkbox" aria-hidden="true"></span>
+      <div><strong>${escapeHtml(entry.label)}</strong><small>${escapeHtml(entry.recipes.join(", "))}</small></div>`;
+    list.append(row);
+  });
+  els.shoppingPrint.replaceChildren(header, list);
+  if (!entries.length) {
+    const empty = el("p");
+    empty.textContent = "Inga ingredienser saknas för vald plats.";
+    els.shoppingPrint.append(empty);
+  }
+}
+
+function printShoppingList() {
+  document.body.dataset.printTarget = "shopping";
+  prepareShoppingPrint();
   window.print();
 }
 
@@ -775,16 +845,18 @@ function renderInventoryCard(entry) {
 
 function loadShoppingLocation() {
   const location = readJson(SHOPPING_LOCATION_KEY, LOCATIONS[0]);
-  return LOCATIONS.includes(location) ? location : LOCATIONS[0];
+  return SHOPPING_LOCATIONS.includes(location) ? location : LOCATIONS[0];
 }
 
 function getShoppingList(location) {
   const missing = new Map();
+  // Without a single location, hasIngredient checks Hemma and Stugan for presence.
+  const matchLocation = location === "Hemma/Stugan" ? undefined : location;
   state.data.recipes.forEach((recipe) => {
     recipe.ingredients.forEach((requirement) => {
       if (requirement.optional) return;
       // Use the existing presence/variant rules, without quantities or unit constraints.
-      if (hasIngredient({ ...requirement, amount: null, unit: "" }, location)) return;
+      if (hasIngredient({ ...requirement, amount: null, unit: "" }, matchLocation)) return;
       const key = JSON.stringify([normalizeKey(requirement.type), requirement.variantId || ""]);
       if (!missing.has(key)) missing.set(key, {
         type: requirement.type,
@@ -813,7 +885,9 @@ function renderShoppingList() {
   }));
   if (!entries.length) {
     const message = el("p", "empty-state");
-    message.textContent = "Du har alla ingredienser för dina registrerade recept på denna plats.";
+    message.textContent = state.shoppingLocation === "Hemma/Stugan"
+      ? "Du har alla ingredienser för dina registrerade recept hemma eller i stugan."
+      : "Du har alla ingredienser för dina registrerade recept på denna plats.";
     els.shoppingList.append(message);
   }
 }

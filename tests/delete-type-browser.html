@@ -1,0 +1,67 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Delete ingredient type tests</title>
+<pre id="result">RUNNING</pre>
+<iframe id="app" title="Delete type test" style="width:375px;height:1400px;border:0"></iframe>
+<script>
+(async()=>{
+  const result=document.getElementById('result'),frame=document.getElementById('app');
+  const assert=(condition,message)=>{if(!condition)throw new Error(message);};
+  try {
+    localStorage.clear();
+    localStorage.setItem('cocktails:data:v1',JSON.stringify({
+      ingredientTypes:[{id:'unused',type:'Vodka',category:'Sprit'},{id:'stock',type:'Gin',category:'Sprit'},{id:'recipe',type:'Tonic',category:'Mixer'},{id:'variant',type:'Campari',category:'Likör'}],
+      ingredientVariants:[{id:'campari',type:'Campari',name:'Special'}],
+      inventory:[{id:'bottle',type:'Gin',category:'Sprit',name:'Flaskan',amount:0,unit:'cl',location:'Hemma'}],
+      recipes:[{id:'drink',name:'Drink',category:'Recept',instructions:'Rör.',sourceUrl:'',ingredients:[{type:'Tonic',amount:1,unit:'st',optional:false}]}]
+    }));
+    const load=()=>new Promise(resolve=>{frame.onload=resolve;frame.src='../index.html';});
+    await load();
+    let w=frame.contentWindow,d=frame.contentDocument;
+    const get=id=>d.getElementById(id),evaluate=code=>w.eval(code);
+    const remove=type=>d.querySelector(`#structureReport button[aria-label="Ta bort ${type}"]`);
+    let alerts=[],confirmations=[],approved=false;
+    w.alert=message=>alerts.push(message);
+    w.confirm=message=>{confirmations.push(message);return approved;};
+    d.querySelector('[data-panel-id="structure"]').open=true;
+    for(const [type,reason] of [['Gin','1 lagerposter'],['Tonic','1 recept'],['Campari','1 registrerade varianter']]) {
+      remove(type).click();
+      assert(alerts.at(-1).includes(reason),'Missing block explanation for '+type);
+      assert(remove(type),'Used definition disappeared');
+    }
+    assert(confirmations.length===0,'Used types must not ask for confirmation');
+    const before=evaluate('JSON.stringify(createBackup())');
+    remove('Vodka').click();
+    assert(confirmations.length===1 && remove('Vodka'),'Cancel removed definition');
+    assert(evaluate('JSON.stringify(createBackup())')===before,'Cancel changed data');
+    get('inventoryType').value='Vodka';
+    get('newVariantType').value='Vodka';
+    const recipeSelect=get('recipeIngredientRows').querySelector('[data-field="type"]');
+    recipeSelect.value='Vodka';
+    get('recipeIngredientRows').querySelector('[data-field="amount"]').value='3';
+    evaluate(`populateIngredientTypeSelect(els.definitionType,'Vodka')`);
+    approved=true;
+    const button=remove('Vodka');
+    assert(button.parentElement.querySelector('[aria-label="Redigera Vodka"]'),'Delete must sit next to Edit');
+    button.click();
+    assert(!remove('Vodka'),'Structure did not refresh');
+    for(const select of [get('inventoryType'),get('newVariantType'),recipeSelect,get('definitionType')]) {
+      assert(![...select.options].some(option=>option.value==='Vodka'),'Deleted type remains in select');
+      assert(select.value==='','Removed selection must be cleared');
+    }
+    assert(get('recipeIngredientRows').querySelector('[data-field="amount"]').value==='3','Draft amount changed');
+    const expected=JSON.parse(before);expected.ingredientTypes=expected.ingredientTypes.filter(entry=>entry.id!=='unused');
+    assert(evaluate('JSON.stringify(createBackup())')===JSON.stringify(expected),'Other data changed');
+    for(const width of [375,1200]) {
+      frame.style.width=width+'px';await new Promise(resolve=>setTimeout(resolve,60));
+      assert(d.documentElement.scrollWidth<=w.innerWidth,'Horizontal overflow at '+width);
+    }
+    evaluate(`restoreBackup(normalizeBackup(JSON.parse(${JSON.stringify(JSON.stringify(expected))})))`);
+    assert(!remove('Vodka'),'JSON restored deleted type');
+    await load();w=frame.contentWindow;d=frame.contentDocument;
+    assert(!remove('Vodka') && remove('Gin'),'Reload did not preserve registry');
+    assert(evaluate('JSON.stringify(createBackup())')===JSON.stringify(expected),'Reload changed other data');
+    result.textContent='PASS: adjacent edit/delete buttons, blocked usage explanations, confirmation/cancel, all type selects refreshed, drafts preserved, unchanged data, mobile/desktop, JSON restore and reload';
+  }catch(error){result.textContent='FAIL: '+error.stack;}
+})();
+</script>

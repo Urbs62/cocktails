@@ -144,6 +144,7 @@
               <span>Lagerplats</span>
               <select id="shoppingLocation"></select>
             </label>
+            <button id="printShoppingBtn" type="button">Skriv ut / PDF</button>
           </div>
           <div class="list" id="shoppingList" aria-live="polite"></div>
         </div>
@@ -316,6 +317,8 @@
         </form>
       </dialog>
     </main>
+
+    <article id="shoppingPrint" class="shopping-print" aria-label="Utskrivbar inköpslista" hidden></article>
 
     <template id="emptyTemplate">
       <div class="empty-state">

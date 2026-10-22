@@ -1,0 +1,78 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Shopping print tests</title>
+<pre id="result">RUNNING</pre>
+<iframe id="app" title="Shopping print test" style="width:375px;height:1400px;border:0"></iframe>
+<script>
+(async()=>{
+  const result=document.getElementById('result'),frame=document.getElementById('app');
+  const assert=(condition,message)=>{if(!condition)throw new Error(message);};
+  const stock=(id,type,location,amount=1,variantId='')=>({id,type,location,amount,variantId,name:id,unit:'cl',category:'Sprit'});
+  const req=(type,variantId='',optional=false)=>({type,variantId,amount:2,unit:'cl',optional});
+  const recipe=(id,name,ingredients)=>({id,name,ingredients,category:'Recept',instructions:'Rör.',sourceUrl:''});
+  window.shortFixture={inventory:[stock('Gin home','Gin','Hemma'),stock('Cointreau away','Cointreau','Stugan'),stock('Rhubarb empty','Vodka','Stugan',0,'r')],
+    ingredientVariants:[{id:'r',type:'Vodka',name:'Rhubarb'}],recipes:[
+      recipe('a','Alpha',[req('Gin'),req('Cointreau'),req('Tequila'),req('Vodka','r'),req('Limejuice','',true)]),
+      recipe('z','Zulu <test>',[req('Tequila'),req('Tequila')]) ]};
+  try{
+    localStorage.clear();localStorage.setItem('cocktails:data:v1',JSON.stringify(shortFixture));
+    await new Promise(resolve=>{frame.onload=resolve;frame.src='../index.html';});
+    const w=frame.contentWindow,d=frame.contentDocument,get=id=>d.getElementById(id),evaluate=code=>w.eval(code);
+    let printCalls=0;
+    w.print=()=>{printCalls++;w.dispatchEvent(new w.Event('beforeprint'));};
+    const change=location=>{get('shoppingLocation').value=location;get('shoppingLocation').dispatchEvent(new w.Event('change',{bubbles:true}));};
+    get('printShoppingBtn').closest('details').open=true;
+    await new Promise(resolve=>setTimeout(resolve,60));
+    for(const location of ['Hemma','Stugan','Hemma/Stugan']){
+      change(location);
+      const stored=Object.fromEntries(Object.keys(localStorage).map(key=>[key,localStorage.getItem(key)]));
+      const backup=evaluate('JSON.stringify(createBackup())');
+      get('printShoppingBtn').click();
+      const output=get('shoppingPrint');
+      const expected=JSON.parse(evaluate('JSON.stringify(getShoppingList(state.shoppingLocation))'));
+      const rows=[...output.querySelectorAll('li')];
+      assert(output.querySelector('h1').textContent==='Cocktails – Inköpslista','Wrong title');
+      assert(output.textContent.includes('Vald plats: '+location),'Wrong location');
+      assert(output.textContent.includes('Utskriftsdatum: '+new Date().getFullYear()),'Date missing');
+      assert(output.textContent.includes('Antal saknade ingredienser: '+expected.length),'Wrong count');
+      assert(JSON.stringify(rows.map(row=>row.querySelector('strong').textContent))===JSON.stringify(expected.map(entry=>entry.label)),'Printed/displayed lists differ');
+      assert(rows.every((row,i)=>row.querySelector('small').textContent===expected[i].recipes.join(', ')),'Recipe names differ');
+      assert(output.querySelectorAll('.shopping-print-checkbox').length===expected.length,'Checkbox missing');
+      const tequila=rows.find(row=>row.textContent.includes('Tequila'));
+      assert(tequila.querySelector('small').textContent==='Alpha, Zulu <test>','Unique ingredient / recipe names incorrect');
+      assert(!output.querySelector('test'),'Recipe text was parsed as HTML');
+      assert(evaluate('JSON.stringify(createBackup())')===backup,'Printing changed backup');
+      assert(JSON.stringify(Object.fromEntries(Object.keys(localStorage).map(key=>[key,localStorage.getItem(key)])))===JSON.stringify(stored),'Printing changed storage');
+      w.dispatchEvent(new w.Event('afterprint'));
+      assert(!d.body.dataset.printTarget,'Print mode not cleared');
+    }
+    assert(printCalls===3,'Print button did not invoke window.print');
+    // Inspect the actual print rules as screen rules in this isolated test frame.
+    const printRule=[...d.styleSheets[0].cssRules].find(rule=>rule.media?.mediaText==='print');
+    assert(printRule,'Print stylesheet missing');printRule.media.mediaText='all';
+    get('printShoppingBtn').click();
+    assert(w.getComputedStyle(d.querySelector('.shell')).display==='none','App UI leaks into print');
+    assert(w.getComputedStyle(d.querySelector('.app-header')).display==='none','Header leaks into print');
+    assert(w.getComputedStyle(get('shoppingPrint')).display==='block','Print content hidden');
+    assert(w.getComputedStyle(get('shoppingPrint')).color==='rgb(0, 0, 0)','Print text not black');
+    assert(w.getComputedStyle(d.body).backgroundColor==='rgb(255, 255, 255)','Print background not white');
+    assert(w.getComputedStyle(get('shoppingPrint').querySelector('li')).breakInside==='avoid','Ingredient/drink names may split');
+    w.dispatchEvent(new w.Event('afterprint'));
+    get('printInventoryBtn').click();
+    assert(d.body.dataset.printTarget==='inventory' && w.getComputedStyle(get('shoppingPrint')).display==='none','Shopping output leaks into inventory print');
+    assert(get('printPreview').textContent.includes('Gin home'),'Existing inventory print failed');
+    w.dispatchEvent(new w.Event('afterprint'));
+    printRule.media.mediaText='print';
+    for(const width of [375,1200]){
+      frame.style.width=width+'px';await new Promise(resolve=>setTimeout(resolve,60));
+      assert(d.documentElement.scrollWidth<=w.innerWidth,'Screen overflow at '+width);
+      assert(get('shoppingPrint').hidden,'Print output visible on screen');
+    }
+    evaluate('state.data.recipes=[]');get('printShoppingBtn').click();
+    assert(get('shoppingPrint').textContent.includes('Inga ingredienser saknas för vald plats.'),'Empty message missing');
+    assert(get('shoppingPrint').querySelectorAll('li').length===0,'Stale rows in empty list');
+    w.dispatchEvent(new w.Event('afterprint'));
+    result.textContent='PASS: all locations, same sorted data, unique rows/all recipe names, escaped text, checkboxes/date/count, empty state, window.print lifecycle, print styles, existing inventory print, mobile/desktop and unchanged storage/backup';
+  }catch(error){result.textContent='FAIL: '+error.stack;}
+})();
+</script>
