@@ -866,6 +866,7 @@ function addRecipeIngredientRow(recipeIngredient = ingredient("", 1, "cl")) {
         <option value="ml">ml</option>
         <option value="l">l</option>
         <option value="st">st</option>
+        <option value="stänk">stänk</option>
       </select>
     </label>
     <label class="optional-field">
@@ -1330,7 +1331,7 @@ function parseIngredientLine(line) {
     .replace(/\(?(optional|valfri)\)?/gi, "")
     .replace(/\s+/g, " ")
     .trim();
-  const match = cleaned.match(/^(.+?)\s+(\d+(?:[.,]\d+)?)\s*(ml|cl|l|liter|st)$/i);
+  const match = cleaned.match(/^(.+?)\s+(\d+(?:[.,]\d+)?)\s*(ml|cl|l|liter|st|stänk)$/i);
 
   if (!match) return ingredient(cleaned, null, "", optional);
   return ingredient(match[1], Number(match[2].replace(",", ".")), match[3], optional);
