@@ -8,6 +8,7 @@ const LAST_RESTORED_KEY = "cocktails:backup:lastRestoredAt";
 const VERMOUTH_CATEGORY_MIGRATION_KEY = "cocktails:migration:vermouth-category:v1";
 const LOCATIONS = ["Hemma", "Stugan"];
 const CATEGORY_OPTIONS = ["Sprit", "Likör", "Vermouth & Starkvin", "Mixer", "Juice & Syrup", "Bitters & Smaksättare", "Garnityr", "Övrigt"];
+const INVENTORY_CATEGORY_ORDER = ["Sprit", "Likör", "Vermouth & Starkvin", "Bitters & Smaksättare", "Juice & Syrup", "Mixer", "Garnityr", "Övrigt"];
 const VERMOUTH_CATEGORY = "Vermouth & Starkvin";
 const VERMOUTH_TYPE_KEYS = new Set([
   "Söt vermouth",
@@ -687,7 +688,18 @@ function getFilteredInventory() {
       if (!state.filters.search) return true;
       return [entry.name, entry.type, entry.variantId ? variantLabel(entry.variantId) : ""].join(" ").toLowerCase().includes(state.filters.search);
     })
-    .sort((a, b) => sortSv(a.type, b.type) || sortSv(a.name, b.name));
+    .sort(compareInventoryDisplay);
+}
+
+function compareInventoryDisplay(a, b) {
+  const rank = (category) => {
+    const index = INVENTORY_CATEGORY_ORDER.indexOf(category);
+    return index < 0 ? INVENTORY_CATEGORY_ORDER.length : index;
+  };
+  return rank(a.category) - rank(b.category)
+    || sortSv(a.category, b.category)
+    || sortSv(a.type, b.type)
+    || sortSv(a.name, b.name);
 }
 
 function summarizeByType(entries) {

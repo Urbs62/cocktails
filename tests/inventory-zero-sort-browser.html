@@ -1,0 +1,69 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Inventory zero balances and sorting</title>
+<pre id="result">RUNNING</pre>
+<iframe id="app" title="Inventory test" style="width:375px;height:1500px;border:0"></iframe>
+<script>
+(async () => {
+  const result = document.getElementById('result'), frame = document.getElementById('app');
+  const assert = (condition, message) => { if (!condition) throw new Error(message); };
+  const equal = (a,b,message) => assert(JSON.stringify(a) === JSON.stringify(b), message);
+  const stock = (id,type,category,unit='cl',amount=0) => ({id,type,category,name:id,unit,amount,location:'Hemma'});
+  const drink = (id,type,unit) => ({id,name:id,category:'Recept',instructions:'Blanda.',sourceUrl:'',ingredients:[{type,amount:1,unit,optional:false}]});
+  const inventory = [
+    stock('Mixer','Tonic','Mixer'), stock('Ö Gin','Gin','Sprit'), stock('Garnityr','Oliver','Garnityr','st'),
+    stock('Juice','Limejuice','Juice & Syrup'), stock('Likör','Campari','Likör'),
+    stock('Å Gin','Gin','Sprit'), stock('Bitters','Angostura bitters','Bitters & Smaksättare'),
+    stock('Vermouth','Söt vermouth','Vermouth & Starkvin'), stock('Ä Gin','Gin','Sprit'),
+    stock('Övrigt','Special','Övrigt')
+  ];
+  const expected = ['Å Gin','Ä Gin','Ö Gin','Likör','Vermouth','Bitters','Juice','Mixer','Garnityr','Övrigt'];
+  try {
+    localStorage.clear();
+    localStorage.setItem('cocktails:data:v1', JSON.stringify({inventory,recipes:[drink('Gin drink','Gin','cl'),drink('Olive drink','Oliver','st')],ingredientVariants:[]}));
+    const load = () => new Promise(resolve => {frame.onload=resolve;frame.src='../index.html';});
+    await load();
+    let w=frame.contentWindow,d=frame.contentDocument;
+    const get = id => d.getElementById(id);
+    const evaluate = code => w.eval(code);
+    const names = () => [...d.querySelectorAll('#inventoryList .card-title strong')].map(node=>node.textContent);
+    const change = (id,value,event='change') => {get(id).value=value;get(id).dispatchEvent(new w.Event(event,{bubbles:true}));};
+    const original = evaluate('JSON.stringify(state.data.inventory)');
+    const stored = localStorage.getItem('cocktails:data:v1');
+    for (const width of [375,1200]) {
+      frame.style.width=width+'px';
+      await new Promise(resolve=>setTimeout(resolve,60));
+      equal(names(),expected,'Category/Swedish order at '+width);
+      assert(d.documentElement.scrollWidth<=w.innerWidth,'Overflow at '+width);
+      change('filterCategory','Sprit'); change('filterType','Gin'); change('filterLocation','Hemma');
+      change('filterSearch','ä gin','input'); equal(names(),['Ä Gin'],'Combined filters at '+width);
+      change('filterLocation','Stugan'); equal(names(),[],'Location filter at '+width);
+      change('filterSearch','','input'); change('filterLocation','all'); change('filterType','all'); change('filterCategory','all');
+      assert(evaluate('JSON.stringify(state.data.inventory)')===original,'Display changed inventory data');
+      assert(localStorage.getItem('cocktails:data:v1')===stored,'Display wrote inventory data');
+    }
+    assert(evaluate('state.data.recipes.every(entry => !getRecipeStatus(entry).canMake)'), '0 cl/st marked available');
+    assert(get('recipeList').textContent.includes('Saknar ingredienser') && !get('recipeList').textContent.includes('Kan göras'),'Wrong zero status text');
+    assert(get('shoppingList').textContent.includes('Gin') && get('shoppingList').textContent.includes('Oliver'),'Zero ingredients missing from shopping list');
+    const ginCard = [...get('inventoryList').children].find(card=>card.textContent.includes('Å Gin'));
+    assert(ginCard.querySelector('.pill').textContent.trim()==='0 cl','Zero amount not displayed');
+    ginCard.querySelector('[data-action="edit"]').click();
+    assert(get('inventoryAmount').value==='0' && get('inventoryAmount').min==='0','Cannot edit zero');
+    get('inventoryAmount').value='5';
+    get('inventoryForm').requestSubmit();
+    assert(evaluate('getRecipeStatus(state.data.recipes[0]).canMake'),'Refill did not update status');
+    assert(get('recipeList').textContent.includes('Kan göras'),'Refill did not refresh cards');
+    assert(!get('shoppingList').textContent.includes('Gin') && get('shoppingList').textContent.includes('Oliver'),'Refill did not refresh shopping');
+    equal(names(),expected,'Refill changed display order');
+    const backup=evaluate('JSON.stringify(createBackup())');
+    assert(evaluate('JSON.stringify(normalizeBackup(JSON.parse(JSON.stringify(createBackup()))).data.inventory) === JSON.stringify(state.data.inventory)'), 'JSON lost inventory');
+    evaluate(`restoreBackup(normalizeBackup(JSON.parse(${JSON.stringify(backup)})))`);
+    equal(names(),expected,'JSON restore lost stock/order');
+    await load(); w=frame.contentWindow; d=frame.contentDocument;
+    equal(names(),expected,'Reload lost stock/order');
+    assert(evaluate('state.data.inventory.length===10 && state.data.inventory.filter(entry=>entry.amount===0).length===9'),'Reload lost zero balances');
+    equal(JSON.parse(evaluate('JSON.stringify(state.data.inventory.map(entry=>entry.id))')),inventory.map(entry=>entry.id),'Stored order changed');
+    result.textContent='PASS: zero cl/st display/edit/status/shopping, refill through form, category and Swedish order at 375/1200px, combined filters, unchanged data order, JSON restore and reload';
+  } catch(error) {result.textContent='FAIL: '+error.stack;}
+})();
+</script>
