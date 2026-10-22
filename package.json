@@ -4,6 +4,6 @@
   "private": true,
   "scripts": {
     "dev": "node dev-server.cjs",
-    "test": "node tests/ingredients.cjs && node tests/flavored-spirits.cjs && node tests/recipe-variants.cjs && node tests/shopping.cjs && node tests/recipe-units.cjs && node tests/rename-type.cjs && node tests/inventory-zero-sort.cjs"
+    "test": "node tests/ingredients.cjs && node tests/flavored-spirits.cjs && node tests/recipe-variants.cjs && node tests/shopping.cjs && node tests/recipe-units.cjs && node tests/rename-type.cjs && node tests/inventory-zero-sort.cjs && node tests/dash-matching.cjs"
   }
 }

@@ -872,6 +872,8 @@ function canMakeAt(recipeEntry, location) {
     let needed = VOLUME_UNITS.has(normalizeUnit(requirement.unit))
       ? toCl(requirement.amount, normalizeUnit(requirement.unit)) : requirement.amount;
     const products = matchingInventory(requirement, location);
+    // Stänk only requires positive stock; it does not consume a measured amount.
+    if (normalizeUnit(requirement.unit) === "stänk") return products.length > 0;
     if (!needed) return products.some((entry) => remaining.get(entry.id) > 0);
     for (const product of products) {
       const used = Math.min(remaining.get(product.id), needed);
@@ -889,6 +891,7 @@ function matchingInventory(recipeIngredient, location) {
     && (!recipeIngredient.variantId || entry.variantId === recipeIngredient.variantId)
     && (!location || entry.location === location) && Number(entry.amount) > 0
     && (normalizeUnit(entry.unit) === normalizeUnit(recipeIngredient.unit)
+      || normalizeUnit(recipeIngredient.unit) === "stänk"
       || (VOLUME_UNITS.has(normalizeUnit(entry.unit)) && VOLUME_UNITS.has(normalizeUnit(recipeIngredient.unit)))
       || !recipeIngredient.unit));
 }
@@ -902,6 +905,7 @@ function hasIngredient(recipeIngredient, location) {
   if (!recipeIngredient.amount || !recipeIngredient.unit) return true;
 
   const wantedUnit = normalizeUnit(recipeIngredient.unit);
+  if (wantedUnit === "stänk") return true;
   if (wantedUnit === "st") {
     return sumByUnit(matches, "st") >= recipeIngredient.amount;
   }
