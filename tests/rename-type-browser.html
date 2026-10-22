@@ -1,0 +1,64 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Rename ingredient type tests</title>
+<pre id="result">RUNNING</pre>
+<iframe id="app" title="Rename test" style="width:375px;height:1400px;border:0"></iframe>
+<script>
+(async () => {
+  const result = document.getElementById('result');
+  const frame = document.getElementById('app');
+  const assert = (condition, message) => { if (!condition) throw new Error(message); };
+  try {
+    localStorage.clear();
+    localStorage.setItem('cocktails:data:v1', JSON.stringify({
+      ingredientTypes: [{id:'fig',type:'Fikokör',category:'Likör'}, {id:'gin',type:'Gin',category:'Sprit'}],
+      ingredientVariants: [{id:'homemade',type:'Fikokör',name:'Hemgjord'}],
+      inventory: [{id:'stock',type:'Fikokör',category:'Likör',name:'Flaskan',variantId:'homemade',amount:20,unit:'cl',location:'Hemma'}],
+      recipes: [{id:'drink',name:'Fikondrink',category:'Recept',instructions:'Rör om.',sourceUrl:'',ingredients:[{type:'Fikokör',variantId:'homemade',amount:2,unit:'cl',optional:false}]}]
+    }));
+    const load = () => new Promise(resolve => { frame.onload = resolve; frame.src = '../index.html'; });
+    await load();
+    let w = frame.contentWindow, d = frame.contentDocument;
+    const evaluate = code => w.eval(code);
+    const get = id => d.getElementById(id);
+    const change = element => element.dispatchEvent(new w.Event('change', {bubbles:true}));
+    evaluate(`editInventory('stock'); editRecipe('drink')`);
+    get('filterType').value = 'Fikokör'; change(get('filterType'));
+    get('newVariantType').value = 'Fikokör';
+    d.querySelector('[data-panel-id="structure"]').open = true;
+    const edit = () => [...d.querySelectorAll('.structure-edit')].find(button => button.getAttribute('aria-label').includes('Fikokör'));
+    edit().click();
+    let form = d.querySelector('.structure-edit-form');
+    assert(form.querySelector('input').value === 'Fikokör', 'Editor must start with current name');
+    form.querySelector('button[type="button"]').click();
+    assert(!d.querySelector('.structure-edit-form'), 'Cancel must close editor');
+    edit().click(); form = d.querySelector('.structure-edit-form');
+    form.querySelector('input').value = 'gIN';
+    form.dispatchEvent(new w.Event('submit', {cancelable:true}));
+    assert(form.querySelector('[role="alert"]').textContent === 'Typen finns redan.', 'Duplicate name not rejected');
+    form.querySelector('input').value = 'Fikonlikör';
+    form.dispatchEvent(new w.Event('submit', {cancelable:true}));
+    assert(!d.querySelector('.structure-edit-form'), 'Successful save must close editor');
+    assert(get('structureReport').textContent.includes('Fikonlikör') && !get('structureReport').textContent.includes('Fikokör'), 'Structure label not updated');
+    assert(get('inventoryType').value === 'Fikonlikör' && get('inventoryVariant').value === 'homemade', 'Open inventory editor lost selection');
+    assert(get('inventoryAmount').value === '20', 'Inventory amount changed');
+    const row = get('recipeIngredientRows').querySelector('.ingredient-row');
+    assert(row.querySelector('[data-field="type"]').value === 'Fikonlikör' && row.querySelector('[data-field="variant"]').value === 'homemade', 'Open recipe editor lost selection');
+    assert(row.querySelector('[data-field="amount"]').value === '2', 'Recipe amount changed');
+    assert(get('newVariantType').value === 'Fikonlikör', 'Variant editor not updated');
+    assert(get('filterType').value === 'Fikonlikör', 'Inventory filter lost selection');
+    assert(get('inventoryList').textContent.includes('Fikonlikör'), 'Inventory did not refresh');
+    assert(get('recipeList').textContent.includes('Fikonlikör') && get('recipeList').textContent.includes('Kan göras'), 'Recipe text/status did not refresh');
+    evaluate(`els.shoppingLocation.value = 'Stugan'; state.shoppingLocation = 'Stugan'; renderShoppingList()`);
+    assert(get('shoppingList').textContent.includes('Fikonlikör'), 'Shopping list did not refresh');
+    for (const width of [375, 1200]) {
+      frame.style.width = width + 'px';
+      assert(d.documentElement.scrollWidth <= w.innerWidth, 'Horizontal overflow at ' + width);
+    }
+    assert(evaluate('JSON.stringify(normalizeBackup(JSON.parse(JSON.stringify(createBackup()))).data.recipes) === JSON.stringify(state.data.recipes)'), 'JSON round-trip changed recipes');
+    await load(); w = frame.contentWindow; d = frame.contentDocument;
+    assert(get('structureReport').textContent.includes('Fikonlikör') && !get('structureReport').textContent.includes('Fikokör'), 'Rename lost after reload');
+    result.textContent = 'PASS: edit/cancel/save, duplicate validation, structure/inventory/recipe/shopping refresh, open forms and filter preservation, mobile/desktop, JSON round-trip and reload';
+  } catch (error) { result.textContent = 'FAIL: ' + error.stack; }
+})();
+</script>

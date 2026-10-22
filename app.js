@@ -474,7 +474,73 @@ function renderStructureRow(row) {
       <div><dt>Recept</dt><dd>${row.recipeCount}</dd></div>
     </dl>
   `;
+  if (row.isKnown) {
+    const edit = el("button", "structure-edit");
+    edit.type = "button";
+    edit.textContent = "Redigera";
+    edit.setAttribute("aria-label", `Redigera ${row.type}`);
+    edit.addEventListener("click", () => {
+      if (node.querySelector("form")) return;
+      const form = el("form", "structure-edit-form");
+      form.innerHTML = `
+        <label><span>Namn på ingredienstyp</span><input required aria-label="Namn på ingredienstyp"></label>
+        <div class="form-actions"><button class="primary" type="submit">Spara</button><button type="button">Avbryt</button></div>
+        <small role="alert"></small>`;
+      const input = form.querySelector("input");
+      input.value = row.type;
+      form.querySelector('button[type="button"]').addEventListener("click", () => {
+        form.remove();
+        edit.hidden = false;
+        edit.focus();
+      });
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const error = renameIngredientType(getIngredientDefinition(row.type)?.id, input.value);
+        if (error) {
+          form.querySelector('[role="alert"]').textContent = error;
+          input.focus();
+        }
+      });
+      edit.hidden = true;
+      node.append(form);
+      input.focus();
+      input.select();
+    });
+    node.querySelector(".structure-type").append(edit);
+  }
   return node;
+}
+
+function renameIngredientType(id, value) {
+  const definition = ingredientTypesStore.find((entry) => entry.id === id);
+  if (!definition) return "Typen finns inte längre.";
+  const name = normalizeLabel(value);
+  if (!name) return "Ange ett namn på typen.";
+  const oldKey = normalizeKey(definition.type);
+  const newKey = normalizeKey(name);
+  // Include unregistered references so a rename cannot silently merge identities.
+  const references = [...ingredientTypesStore, ...ingredientVariantsStore,
+    ...state.data.inventory, ...state.data.recipes.flatMap((entry) => entry.ingredients)];
+  if (newKey !== oldKey && references.some((entry) => normalizeKey(entry.type) === newKey)) {
+    return "Typen finns redan.";
+  }
+  const rename = (entry) => normalizeKey(entry.type) === oldKey ? { ...entry, type: name } : entry;
+  ingredientTypesStore = ingredientTypesStore.map((entry) => entry.id === id ? { ...entry, type: name } : entry);
+  ingredientVariantsStore = ingredientVariantsStore.map(rename);
+  state.data = { ...state.data,
+    inventory: state.data.inventory.map(rename),
+    recipes: state.data.recipes.map((entry) => ({ ...entry, ingredients: entry.ingredients.map(rename) }))
+  };
+  if (normalizeKey(state.filters.type) === oldKey) {
+    state.filters.type = name;
+    els.filterType.append(option(name, name));
+    els.filterType.value = name;
+  }
+  persistIngredientTypes();
+  refreshTypeControls(definition.type, name);
+  render();
+  showToast("Typens namn uppdaterat.");
+  return "";
 }
 
 function togglePrintPreview() {
@@ -1069,17 +1135,21 @@ function resetTypeForm() {
   populateCategorySelect(els.newTypeCategory);
 }
 
-function refreshTypeControls() {
-  const inventoryType = els.inventoryType.value;
+function refreshTypeControls(oldType = "", newType = "") {
+  const renamed = (value) => oldType && normalizeKey(value) === normalizeKey(oldType) ? newType : value;
+  const inventoryType = renamed(els.inventoryType.value);
   populateIngredientTypeSelect(els.inventoryType, inventoryType);
   populateVariantSelect(els.inventoryVariant, inventoryType, els.inventoryVariant.value);
-  populateIngredientTypeSelect(els.newVariantType, els.newVariantType.value);
+  populateIngredientTypeSelect(els.newVariantType, renamed(els.newVariantType.value));
+  if (oldType && normalizeKey(els.definitionType.value) === normalizeKey(oldType)) {
+    populateIngredientTypeSelect(els.definitionType, newType);
+  }
   renderVariants();
   // Refresh only selects: retain unfinished rows, amounts, units and optional flags.
   els.recipeIngredientRows.querySelectorAll(".ingredient-row").forEach((row) => {
     const typeSelect = row.querySelector('[data-field="type"]');
     const variantSelect = row.querySelector('[data-field="variant"]');
-    populateIngredientTypeSelect(typeSelect, typeSelect.value);
+    populateIngredientTypeSelect(typeSelect, renamed(typeSelect.value));
     populateVariantSelect(variantSelect, typeSelect.value, variantSelect.value, true);
   });
 }

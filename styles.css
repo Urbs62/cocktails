@@ -761,6 +761,18 @@ a {
   overflow-wrap: anywhere;
 }
 
+.structure-edit {
+  padding: 0.2rem 0.45rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.structure-edit-form {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 0.5rem;
+}
+
 .structure-warning {
   padding: 0.16rem 0.4rem;
   border: 1px solid rgba(224, 169, 79, 0.58);
