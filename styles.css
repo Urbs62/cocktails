@@ -518,6 +518,23 @@ textarea:focus {
   margin-top: 0.65rem;
 }
 
+.inventory-transfer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.45rem;
+  margin-top: 0.7rem;
+}
+
+.inventory-transfer label {
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+
+.inventory-transfer button {
+  flex: 1 1 auto;
+}
+
 .card-actions {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1003,6 +1020,37 @@ a {
 }
 
 @media print {
+  @page inventory-overview {
+    size: A4 portrait;
+    margin: 8mm;
+  }
+
+  body[data-print-target="inventory-overview"] {
+    page: inventory-overview;
+  }
+
+  body[data-print-target="inventory-overview"] > :not(#inventoryOverviewPrint) {
+    display: none !important;
+  }
+
+  body[data-print-target="inventory-overview"] #inventoryOverviewPrint {
+    display: block !important;
+    color: #000;
+    font: 9.5pt/1.2 Arial, sans-serif;
+    overflow-wrap: anywhere;
+  }
+
+  #inventoryOverviewPrint header { break-after: avoid; }
+  #inventoryOverviewPrint h1 { font-size: 12pt; margin: 0 0 2mm; }
+  #inventoryOverviewPrint p { margin: 0 0 3mm; }
+  #inventoryOverviewPrint table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  #inventoryOverviewPrint thead { display: table-header-group; }
+  #inventoryOverviewPrint tr { break-inside: avoid; page-break-inside: avoid; }
+  #inventoryOverviewPrint th,
+  #inventoryOverviewPrint td { padding: 1.2mm 1.5mm; border-bottom: 0.2mm solid #ccc; text-align: right; vertical-align: top; font-variant-numeric: tabular-nums; }
+  #inventoryOverviewPrint th:first-child,
+  #inventoryOverviewPrint td:first-child { text-align: left; }
+
   @page {
     size: A4;
     margin: 12mm;

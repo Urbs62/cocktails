@@ -137,6 +137,7 @@ function bindElements() {
     "debugTypeCount", "restoreLog", "backupSummaryText", "lastExportedAt", "lastRestoredAt", "restoreBtn",
     "restoreDialog", "confirmRestoreBtn", "cancelRestoreBtn", "structureSummaryText", "structureReport",
     "printSummaryText", "togglePrintPreview", "printInventoryBtn", "printPreview",
+    "printInventoryOverviewBtn", "inventoryOverviewPrint",
     "inventoryVariant", "newInventoryVariant", "variantForm", "newVariantType", "newVariantName", "variantList",
     "ingredientDialog", "ingredientDefinitionForm", "definitionType", "definitionTypeName",
     "definitionCategory", "definitionVariantName", "definitionNewTypeFields", "cancelIngredientDefinition"
@@ -203,9 +204,11 @@ function bindEvents() {
   els.restoreDialog.addEventListener("cancel", clearPendingRestore);
   els.togglePrintPreview.addEventListener("click", togglePrintPreview);
   els.printInventoryBtn.addEventListener("click", printInventory);
+  els.printInventoryOverviewBtn.addEventListener("click", printInventoryOverview);
   els.printShoppingBtn.addEventListener("click", printShoppingList);
   window.addEventListener("beforeprint", () => {
     if (document.body.dataset.printTarget === "shopping") prepareShoppingPrint();
+    else if (document.body.dataset.printTarget === "inventory-overview") prepareInventoryOverviewPrint();
     else prepareInventoryPrint();
   });
   window.addEventListener("afterprint", () => { delete document.body.dataset.printTarget; });
@@ -606,6 +609,47 @@ function printInventory() {
   window.print();
 }
 
+function getInventoryOverviewRows() {
+  const rows = new Map();
+  state.data.inventory.forEach((entry) => {
+    if (!LOCATIONS.includes(entry.location)) return;
+    const key = JSON.stringify([entry.type, entry.name, entry.variantId || ""]);
+    if (!rows.has(key)) rows.set(key, {
+      name: `${entry.name} · ${entry.type}${entry.variantId ? ` / ${variantLabel(entry.variantId)}` : ""}`,
+      key, Hemma: new Map(), Stugan: new Map()
+    });
+    const quantities = rows.get(key)[entry.location];
+    const unit = normalizeUnit(entry.unit);
+    const volume = VOLUME_UNITS.has(unit);
+    const reportUnit = volume ? "cl" : unit;
+    const amount = volume ? convertAmount(Number(entry.amount), unit, "cl") : Number(entry.amount);
+    quantities.set(reportUnit, (quantities.get(reportUnit) || 0) + amount);
+  });
+  const format = (quantities) => quantities.size
+    ? [...quantities].sort(([a], [b]) => sortSv(a, b)).map(([unit, amount]) =>
+      `${formatAmount(amount)}${unit === "cl" ? "" : ` ${unit}`}`).join(" + ")
+    : "—";
+  return [...rows.values()].sort((a, b) => sortSv(a.name, b.name) || sortSv(a.key, b.key))
+    .map((row) => ({ name: row.name, Hemma: format(row.Hemma), Stugan: format(row.Stugan) }));
+}
+
+function prepareInventoryOverviewPrint() {
+  const rows = getInventoryOverviewRows();
+  els.inventoryOverviewPrint.innerHTML = `
+    <header><h1>Lageröversikt · Hemma och Stugan</h1>
+      <p>Utskriven: ${escapeHtml(formatPrintDate(new Date()))}</p></header>
+    <table><colgroup><col style="width:64%"><col style="width:18%"><col style="width:18%"></colgroup>
+      <thead><tr><th scope="col">Ingrediens / namn</th><th scope="col">Hemma (cl)</th><th scope="col">Stugan (cl)</th></tr></thead>
+      <tbody>${rows.map((row) => `<tr><td>${escapeHtml(row.name)}</td><td>${escapeHtml(row.Hemma)}</td><td>${escapeHtml(row.Stugan)}</td></tr>`).join("")}</tbody>
+    </table>${rows.length ? "" : "<p>Inga lagerposter.</p>"}`;
+}
+
+function printInventoryOverview() {
+  document.body.dataset.printTarget = "inventory-overview";
+  prepareInventoryOverviewPrint();
+  window.print();
+}
+
 function prepareShoppingPrint() {
   const entries = getShoppingList(state.shoppingLocation);
   const header = el("header");
@@ -828,15 +872,27 @@ function renderInventoryCard(entry) {
       <span class="pill">${escapeHtml(entry.location)}</span>
       ${unknownType ? `<span class="pill warn">Okänd typ</span>` : ""}
     </div>
-    <div class="card-actions">
-      <button type="button" data-action="move">Flytta</button>
+    <form class="inventory-transfer">
+      <label>
+        <span>Flytta (${escapeHtml(entry.unit)}) · Tillgängligt: ${formatAmount(entry.amount)} ${escapeHtml(entry.unit)}</span>
+        <input data-field="transfer-amount" aria-label="Mängd att flytta" type="number" step="any" min="0" max="${escapeAttr(entry.amount)}" value="${escapeAttr(entry.amount)}" required>
+      </label>
+      <button type="submit" data-action="move" ${entry.amount > 0 ? "" : "disabled"}>Flytta till ${nextLocation}</button>
+    </form>
+    <div class="card-actions two-actions">
       <button type="button" data-action="edit">Ändra</button>
       <button class="danger" type="button" data-action="delete">Ta bort</button>
     </div>
   `;
 
-  card.querySelector('[data-action="move"]').addEventListener("click", () => {
-    updateInventory(entry.id, { location: nextLocation }, `Flyttade till ${nextLocation}.`);
+  const transferAmount = card.querySelector('[data-field="transfer-amount"]');
+  transferAmount.addEventListener("input", () => transferAmount.setCustomValidity(""));
+  card.querySelector('.inventory-transfer').addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (!transferInventory(entry.id, transferAmount.valueAsNumber)) {
+      transferAmount.setCustomValidity("Ange en mängd större än 0 och högst tillgängligt lager.");
+      transferAmount.reportValidity();
+    }
   });
   card.querySelector('[data-action="edit"]').addEventListener("click", () => editInventory(entry.id));
   card.querySelector('[data-action="delete"]').addEventListener("click", () => deleteInventory(entry.id));
@@ -1152,6 +1208,32 @@ function saveTypeFromForm(event) {
 function updateInventory(id, patch, message = "Ingrediens uppdaterad.") {
   state.data.inventory = state.data.inventory.map((entry) => entry.id === id ? { ...entry, ...patch } : entry);
   persistAndRender(message);
+}
+
+function transferInventory(id, amount) {
+  const source = state.data.inventory.find((entry) => entry.id === id);
+  if (!source || !LOCATIONS.includes(source.location) || !Number.isFinite(amount)
+    || amount <= 0 || amount > source.amount) return false;
+
+  const location = source.location === "Hemma" ? "Stugan" : "Hemma";
+  // Keep different products, variants and units on separate cards.
+  const destination = state.data.inventory.find((entry) => entry.id !== id
+    && entry.location === location && entry.type === source.type
+    && entry.name === source.name && (entry.variantId || "") === (source.variantId || "")
+    && entry.unit === source.unit);
+  const fullTransfer = amount === source.amount;
+  if (destination) {
+    destination.amount += amount;
+    if (fullTransfer) state.data.inventory = state.data.inventory.filter((entry) => entry.id !== id);
+    else source.amount -= amount;
+  } else if (fullTransfer) {
+    source.location = location;
+  } else {
+    source.amount -= amount;
+    state.data.inventory.push({ ...source, id: createId(), amount, location });
+  }
+  persistAndRender(`Flyttade ${formatAmount(amount)} ${source.unit} till ${location}.`);
+  return true;
 }
 
 function updateRecipe(id, patch, message = "Recept uppdaterat.") {
