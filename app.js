@@ -616,6 +616,7 @@ function getInventoryOverviewRows() {
     const key = JSON.stringify([entry.type, entry.name, entry.variantId || ""]);
     if (!rows.has(key)) rows.set(key, {
       name: `${entry.name} · ${entry.type}${entry.variantId ? ` / ${variantLabel(entry.variantId)}` : ""}`,
+      category: entry.category, type: entry.type, productName: entry.name,
       key, Hemma: new Map(), Stugan: new Map()
     });
     const quantities = rows.get(key)[entry.location];
@@ -629,7 +630,10 @@ function getInventoryOverviewRows() {
     ? [...quantities].sort(([a], [b]) => sortSv(a, b)).map(([unit, amount]) =>
       `${formatAmount(amount)}${unit === "cl" ? "" : ` ${unit}`}`).join(" + ")
     : "—";
-  return [...rows.values()].sort((a, b) => sortSv(a.name, b.name) || sortSv(a.key, b.key))
+  const compare = (a, b) => String(a || "").localeCompare(String(b || ""), "sv-SE");
+  return [...rows.values()].sort((a, b) => compare(a.category, b.category)
+    || compare(a.type, b.type) || compare(a.productName, b.productName)
+    || compare(a.name, b.name) || compare(a.key, b.key))
     .map((row) => ({ name: row.name, Hemma: format(row.Hemma), Stugan: format(row.Stugan) }));
 }
 

@@ -31,8 +31,9 @@ assert.equal(rows.find(r => r.name.endsWith('/ Dry')).Stugan, '6');
 assert.equal(rows.find(r => r.name === '<Zero &> · Gin').Hemma, '0');
 assert.equal(rows.find(r => r.name === '<Zero &> · Gin').Stugan, '—');
 assert.equal(rows.find(r => r.name === 'Mixed · Gin').Hemma, '10 + 3 st + 2 stänk');
-assert.deepEqual(rows.slice(-3).map(r => r.name), ['Å · Gin', 'Ä · Gin', 'Ö · Gin']);
-assert.deepEqual(rows.map(r => r.name), rows.map(r => r.name).sort((a,b) => a.localeCompare(b, 'sv')));
+const ginRows = rows.filter(r => r.name.endsWith(' · Gin'));
+assert.deepEqual(ginRows.slice(-3).map(r => r.name), ['Å · Gin', 'Ä · Gin', 'Ö · Gin']);
+assert.equal(rows.at(-1).name, 'Apple · Vodka', 'Type takes priority over product name');
 assert.equal(run('JSON.stringify(state.data) === before'), true);
 assert.equal(storage.has('cocktails:data:v1'), false, 'Printing must not persist data');
 assert.equal(run('window.printed'), true);
@@ -43,6 +44,26 @@ for (const heading of ['Ingrediens / namn', 'Hemma (cl)', 'Stugan (cl)']) assert
 assert.match(html, /Utskriven: \d{4}-\d{2}-\d{2}/);
 assert.ok(html.includes('&lt;Zero &amp;&gt;'));
 assert.equal((html.match(/<td>/g) || []).length, rows.length * 3);
+// Each level deliberately restarts product names to catch flattened name sorting.
+const alphabet = ['A', 'Z', 'Å', 'Ä', 'Ö'];
+const hierarchy = alphabet.flatMap(category => alphabet.flatMap(type => alphabet.map(name =>
+  stock(name, 1, 'cl', 'Hemma', { category, type: `${type} ${category}` }))));
+run(`state.data.inventory = ${JSON.stringify(hierarchy.slice().reverse())};
+  globalThis.hierarchyBefore = JSON.stringify(state.data.inventory);
+  prepareInventoryOverviewPrint();`);
+assert.deepEqual(JSON.parse(run('JSON.stringify(getInventoryOverviewRows().map(row => row.name))')),
+  hierarchy.map(entry => `${entry.name} · ${entry.type}`),
+  'Category, type and product name each use Swedish A Z Å Ä Ö ordering');
+assert.equal(run('JSON.stringify(state.data.inventory) === hierarchyBefore'), true);
+// Unique names make the category boundary observable, independently of the comparator.
+run(`state.data.inventory = ${JSON.stringify([
+  stock('A product', 1, 'cl', 'Hemma', { category: 'Övrigt', type: 'A type' }),
+  stock('Z product', 1, 'cl', 'Stugan', { category: 'Bitters', type: 'Z type' })
+])}; prepareInventoryOverviewPrint();`);
+assert.deepEqual(JSON.parse(run('JSON.stringify(getInventoryOverviewRows().map(row => row.name))')),
+  ['Z product · Z type', 'A product · A type'], 'Category takes priority over type and product');
+const sortedHtml = run('els.inventoryOverviewPrint.innerHTML');
+assert.ok(sortedHtml.indexOf('Z product · Z type') < sortedHtml.indexOf('A product · A type'));
 run('state.data.inventory = []; prepareInventoryOverviewPrint()');
 assert.match(run('els.inventoryOverviewPrint.innerHTML'), /Inga lagerposter/);
 const css = fs.readFileSync('styles.css', 'utf8');
