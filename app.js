@@ -626,10 +626,14 @@ function getInventoryOverviewRows() {
     const amount = volume ? convertAmount(Number(entry.amount), unit, "cl") : Number(entry.amount);
     quantities.set(reportUnit, (quantities.get(reportUnit) || 0) + amount);
   });
-  const format = (quantities) => quantities.size
-    ? [...quantities].sort(([a], [b]) => sortSv(a, b)).map(([unit, amount]) =>
-      `${formatAmount(amount)}${unit === "cl" ? "" : ` ${unit}`}`).join(" + ")
-    : "—";
+  // Keep extra precision only where the usual report rounding would hide stock.
+  const formatReportAmount = (amount) => amount > 0 && amount < 0.05
+    ? amount.toLocaleString("sv-SE", { maximumSignificantDigits: 15 })
+    : formatAmount(amount);
+  const format = (quantities) => [...quantities]
+    .filter(([, amount]) => amount !== 0)
+    .sort(([a], [b]) => sortSv(a, b)).map(([unit, amount]) =>
+      `${formatReportAmount(amount)}${unit === "cl" ? "" : ` ${unit}`}`).join(" + ") || "—";
   const compare = (a, b) => String(a || "").localeCompare(String(b || ""), "sv-SE");
   return [...rows.values()].sort((a, b) => compare(a.category, b.category)
     || compare(a.type, b.type) || compare(a.productName, b.productName)
